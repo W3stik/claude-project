@@ -7,7 +7,7 @@ stale, which covers exchange holidays in practice.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -52,6 +52,19 @@ class MarketSession:
             hour=self.close.hour, minute=self.close.minute, second=0, microsecond=0
         )
         return (close_dt - local).total_seconds() / 60
+
+    def next_open(self, now: datetime) -> datetime | None:
+        """Next regular session open after ``now`` (exchange time); ``None`` for 24h markets."""
+        if self.is_24h:
+            return None
+        local = self.local(now)
+        day = local.date()
+        for _ in range(8):
+            candidate = datetime.combine(day, self.open, tzinfo=self.zone)
+            if candidate > local and not (self.weekdays_only and candidate.weekday() >= 5):
+                return candidate
+            day += timedelta(days=1)
+        return None
 
     def minutes_since_open(self, now: datetime) -> float | None:
         if self.is_24h or not self.is_open(now):

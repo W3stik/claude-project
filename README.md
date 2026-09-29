@@ -51,6 +51,8 @@ Na Windows při instalaci Pythonu zaškrtni **„Add python.exe to PATH“**.
    a nainstaluje knihovny (několik minut).
 3. Aplikaci pak spouštíš dvojklikem na **`start.bat`**. Dashboard se otevře v prohlížeči
    na http://localhost:8501. Černé okno nech otevřené, jinak se aplikace vypne.
+4. Automatické obchodování na papírovém účtu spustíš dvojklikem na **`bot.bat`**
+   (viz [Automatické obchodování](#automatické-obchodování-bot)).
 
 ### Windows – ručně v PowerShellu
 
@@ -205,17 +207,40 @@ take-profit = vstup ± DT_TAKE_PROFIT_R × vzdálenost stopu
 Kontroly před každým novým obchodem: denní limit ztráty (`DT_MAX_DAILY_LOSS_PCT`), počet otevřených pozic,
 počet obchodů za den, povinný stop-loss, kupní síla a povolení shortu (`DT_ALLOW_SHORT`, výchozí vypnuto).
 
-## Bot
+## Automatické obchodování (bot)
 
-```bash
-daytrader bot -s vwap_trend --symbols AAPL,MSFT,NVDA -i 5m --dry-run   # nejdřív jen sledovat
-daytrader bot -s vwap_trend --symbols AAPL,MSFT,NVDA -i 5m             # papírové obchodování
-```
+Bot obchoduje sám. Výchozí je **papírový účet**, tedy falešné peníze bez rizika.
 
+**Jak ho spustit (vyber si jednu cestu):**
+
+1. **Dvojklik na `bot.bat`** (Windows). Bot běží v černém okně, dokud ho nezavřeš nebo nestiskneš Ctrl+C.
+   Strategii, symboly a interval nastavíš v souboru `.env`:
+   ```ini
+   DT_BOT_STRATEGY=vwap_trend        # vwap_trend | orb | ema_cross | rsi_reversion | bollinger | macd
+   DT_BOT_INTERVAL=5m
+   DT_BOT_SYMBOLS=AAPL,MSFT,NVDA,AMD,TSLA
+   DT_BOT_PARAMS=                    # např. fast=9,slow=21
+   ```
+2. **Dashboard → stránka *Bot*.** Vybereš symboly, strategii a parametry a klikneš na *Spustit bota*.
+   Uvidíš stav, otevřené pozice a rozhodnutí. Bot běží, dokud běží dashboard.
+3. **Příkazová řádka:** `daytrader bot` (bere nastavení z `.env`), případně
+   `daytrader bot -s orb --symbols AAPL,MSFT -i 5m`. Volba `--dry-run` jen vypisuje rozhodnutí a nic neobchoduje.
+
+**Co bot dělá:**
 - Po uzavření každé svíčky vyhodnotí strategii. Vstupuje jen na **nový** signál a vystupuje, když se signál otočí.
+- Každý obchod má stop-loss a take-profit z ATR. Velikost pozice a limity bere z nastavení rizika
+  (1 % na obchod, max. 3 pozice, denní limit ztráty 3 %).
 - 15 minut před koncem obchodování už neotevírá nové pozice a 5 minut před koncem všechny uzavře.
-- Rozhodnutí zapisuje do deníku (`daytrader journal`, stránka *Deník*).
-- Běží i z dashboardu (stránka *Bot*), ale jen dokud dashboard běží.
+- Mimo obchodní hodiny čeká a každých 30 minut vypíše, kdy se trh otevře.
+- Na jednom účtu smí běžet jen jeden bot. Druhý (např. současně z `bot.bat` i z dashboardu) se nespustí.
+- Všechno zapisuje do deníku (stránka *Deník*, `daytrader journal`).
+
+**Kdy obchoduje:** americké akcie po–pá 15:30–22:00 našeho času, pražská burza 9:00–16:20.
+Krypto (`BTC-USD`, `ETH-USD`) se obchoduje nonstop, hodí se na vyzkoušení bota i večer a o víkendu.
+
+**Aby běžel každý den sám:** stiskni Win+R, napiš `shell:startup` a do otevřené složky vlož zástupce na `bot.bat`.
+Bot se pak spustí po každém přihlášení do Windows. Počítač nesmí během obchodních hodin usnout
+(Nastavení → Systém → Napájení).
 
 ## Přechod na živé obchodování
 

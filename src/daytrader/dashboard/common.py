@@ -6,7 +6,7 @@ import threading
 from collections import deque
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -127,15 +127,24 @@ def polarity(value: float | None) -> str:
     return "blue" if value > 0 else "orange"
 
 
-def local_time(values: pd.Series) -> pd.Series:
-    """UTC timestamps -> the viewer's timezone (as reported by the browser) for display."""
-    tz = None
+def viewer_tz() -> str:
+    """The viewer's timezone as reported by the browser (fallback: Prague)."""
     try:
-        tz = st.context.timezone
+        return st.context.timezone or "Europe/Prague"
     except Exception:
-        pass
+        return "Europe/Prague"
+
+
+def local_time(values: pd.Series) -> pd.Series:
+    """UTC timestamps -> the viewer's timezone for display."""
     stamps = pd.to_datetime(values, utc=True)
-    return stamps.dt.tz_convert(tz or "Europe/Prague").dt.tz_localize(None)
+    return stamps.dt.tz_convert(viewer_tz()).dt.tz_localize(None)
+
+
+def local_dt(value: datetime) -> datetime:
+    stamp = pd.Timestamp(value)
+    stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp
+    return stamp.tz_convert(viewer_tz()).to_pydatetime()
 
 
 # -- background bot ---------------------------------------------------------------------
@@ -145,6 +154,7 @@ class BotRunner:
     def __init__(self) -> None:
         self.thread: threading.Thread | None = None
         self.stop_event: threading.Event | None = None
+        self.bot: TradingBot | None = None
         self.label = ""
         self.started_at: datetime | None = None
         self.decisions: deque[tuple[datetime, Decision]] = deque(maxlen=300)
@@ -158,12 +168,13 @@ class BotRunner:
         if self.running:
             raise BrokerError("Bot už běží – nejdřív ho zastav.")
         self.stop_event = threading.Event()
+        self.bot = bot
         self.label = label
-        self.started_at = datetime.now()
+        self.started_at = datetime.now(timezone.utc)
         self.last_error = None
 
         def record(decisions: list[Decision]) -> None:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             for decision in decisions:
                 if decision.action not in ("hold", "skip"):
                     self.decisions.appendleft((now, decision))

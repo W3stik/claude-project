@@ -6,7 +6,7 @@ import sqlite3
 from collections import deque
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +29,12 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS bot_state (
     symbol TEXT PRIMARY KEY, side TEXT, entry REAL, stop REAL, target REAL, updated TEXT
 );
+CREATE TABLE IF NOT EXISTS bot_lock (
+    account TEXT PRIMARY KEY, instance TEXT NOT NULL, info TEXT, heartbeat TEXT NOT NULL
+);
 """
+
+BOT_LOCK_STALE = timedelta(minutes=3)
 
 
 def _now() -> datetime:
@@ -123,6 +128,42 @@ class Journal:
     def clear_state(self, symbol: str) -> None:
         with self._tx() as conn:
             conn.execute("DELETE FROM bot_state WHERE symbol = ?", (symbol,))
+
+    # -- one bot per account (works across processes: CLI, bot.bat, dashboard) -------
+    def bot_lock_holder(self, account: str, now: datetime) -> str | None:
+        """Description of the bot currently trading ``account``, or ``None``."""
+        with self._tx() as conn:
+            row = conn.execute("SELECT * FROM bot_lock WHERE account = ?", (account,)).fetchone()
+        if row is None or now - datetime.fromisoformat(row["heartbeat"]) > BOT_LOCK_STALE:
+            return None
+        return row["info"] or "bot"
+
+    def acquire_bot_lock(self, account: str, instance: str, info: str, now: datetime) -> str | None:
+        """Claim the account for this bot; returns the other holder's description if it is taken."""
+        with self._tx() as conn:
+            row = conn.execute("SELECT * FROM bot_lock WHERE account = ?", (account,)).fetchone()
+            if (
+                row is not None
+                and row["instance"] != instance
+                and now - datetime.fromisoformat(row["heartbeat"]) <= BOT_LOCK_STALE
+            ):
+                return row["info"] or "bot"
+            conn.execute(
+                "INSERT OR REPLACE INTO bot_lock (account, instance, info, heartbeat) VALUES (?, ?, ?, ?)",
+                (account, instance, info, now.isoformat()),
+            )
+        return None
+
+    def heartbeat_bot_lock(self, account: str, instance: str, now: datetime) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE bot_lock SET heartbeat = ? WHERE account = ? AND instance = ?",
+                (now.isoformat(), account, instance),
+            )
+
+    def release_bot_lock(self, account: str, instance: str) -> None:
+        with self._tx() as conn:
+            conn.execute("DELETE FROM bot_lock WHERE account = ? AND instance = ?", (account, instance))
 
 
 # -- round trips & statistics ------------------------------------------------------------

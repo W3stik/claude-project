@@ -7,6 +7,7 @@ import math
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Callable
@@ -22,7 +23,7 @@ from .ai import AIAnalyst, AIError
 from .analysis.snapshot import build_snapshot
 from .backtest import EXIT_REASONS, BacktestConfig, grid_search, run_backtest
 from .backtest.metrics import METRIC_LABELS, format_metric
-from .bot import BotConfig, TradingBot
+from .bot import BotAlreadyRunning, BotConfig, TradingBot, next_market_open
 from .brokers import BrokerError, create_broker
 from .brokers.base import Broker
 from .brokers.paper import PaperBroker
@@ -72,7 +73,7 @@ def guarded(fn: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return fn(*args, **kwargs)
-        except (ConfigError, DataError, BrokerError, AIError, ValueError) as exc:
+        except (ConfigError, DataError, BrokerError, AIError, BotAlreadyRunning, ValueError) as exc:
             console.print(f"[bold red]Chyba:[/] {exc}")
             raise typer.Exit(1) from exc
 
@@ -550,10 +551,10 @@ def paper_reset(
 @app.command()
 @guarded
 def bot(
-    strategy: Annotated[str, typer.Option("--strategy", "-s")] = "vwap_trend",
-    symbols: Annotated[str | None, typer.Option(help="Symboly oddělené čárkou (výchozí DT_WATCHLIST)")] = None,
-    param: Annotated[list[str] | None, typer.Option("--param", help="Parametr strategie klic=hodnota")] = None,
-    interval: IntervalOpt = "5m",
+    strategy: Annotated[str | None, typer.Option("--strategy", "-s", help="Strategie [DT_BOT_STRATEGY]")] = None,
+    symbols: Annotated[str | None, typer.Option(help="Symboly oddělené čárkou [DT_BOT_SYMBOLS, jinak DT_WATCHLIST]")] = None,
+    param: Annotated[list[str] | None, typer.Option("--param", help="Parametr strategie klic=hodnota [DT_BOT_PARAMS]")] = None,
+    interval: Annotated[str | None, typer.Option("--interval", "-i", help="Interval svíček [DT_BOT_INTERVAL]")] = None,
     lookback: Annotated[str, typer.Option(help="Kolik historie načítat pro signály")] = "5d",
     broker: BrokerOpt = None,
     provider: ProviderOpt = None,
@@ -561,31 +562,60 @@ def bot(
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Jen vypisovat rozhodnutí, nic neposílat")] = False,
     yes: YesOpt = False,
 ) -> None:
-    """Automatický obchodní bot (Ctrl+C = zastavení)."""
+    """Automatický obchodní bot (Ctrl+C = zastavení). Výchozí nastavení bere z .env (DT_BOT_*)."""
     settings = get_settings()
     brk, data = make_broker(broker, provider)
-    strat = get_strategy(strategy, **parse_params(param))
-    watch = parse_symbols(symbols) if symbols else settings.watchlist_symbols
+    strategy_key = strategy or settings.bot_strategy
+    if param:
+        params: dict[str, Any] = parse_params(param)
+    elif strategy_key == settings.bot_strategy:
+        params = settings.bot_param_dict
+    else:
+        params = {}
+    strat = get_strategy(strategy_key, **params)
+    watch = parse_symbols(symbols) if symbols else settings.bot_symbol_list
+    interval = interval or settings.bot_interval
     if not dry_run:
         confirm_live(brk, yes, f"spuštění bota {strat.label()} na {', '.join(watch)}")
     trading_bot = TradingBot(brk, data, strat, risk_manager(), journal_for(),
                              BotConfig(symbols=watch, interval=interval, lookback=lookback, dry_run=dry_run))
+    last_notice = {"at": float("-inf")}
 
     def show(decisions) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
-        for d in decisions:
-            if d.action in ("hold", "skip") and not once:
-                continue
+        shown = [d for d in decisions if once or d.action not in ("hold", "skip")]
+        for d in shown:
             color = {"error": "red", "blocked": "yellow", "enter_long": "blue", "enter_short": "dark_orange"}.get(d.action, "white")
             console.print(f"[dim]{stamp}[/] [bold]{d.symbol:10}[/] [{color}]{d.action:12}[/] {d.message}")
             for warning in d.warnings:
                 console.print(f"           [yellow]⚠ {warning}[/]")
+        if shown:
+            last_notice["at"] = time.monotonic()
+        elif time.monotonic() - last_notice["at"] >= 30 * 60:  # reassure that the bot is alive
+            last_notice["at"] = time.monotonic()
+            opening = next_market_open(watch, datetime.now(timezone.utc))
+            if opening is not None:
+                console.print(f"[dim]{stamp}[/] Trh je zavřený, bot čeká. Nejbližší otevření: {local(opening):%d.%m. %H:%M}.")
+            else:
+                console.print(f"[dim]{stamp}[/] Bot běží, zatím žádný nový signál.")
 
     if once:
         show(trading_bot.run_once())
         return
-    console.print(Panel(f"Bot běží: {strat.label()} · {', '.join(watch)} · {interval} · broker {brk.name}"
-                        f"{' · SUCHÝ BĚH' if dry_run else ''}\nZastavíš ho klávesami Ctrl+C.", border_style="blue"))
+    account = brk.get_account()
+    if dry_run:
+        mode = "SUCHÝ BĚH – nic se neposílá"
+    elif brk.is_live:
+        mode = "ŽIVÝ ÚČET – skutečné peníze"
+    else:
+        mode = "papírový účet – falešné peníze"
+    console.print(Panel(
+        f"Strategie: {strat.label()}\n"
+        f"Symboly: {', '.join(watch)} · interval {interval}\n"
+        f"Broker: {brk.name} ({mode}) · kapitál {fmt(account.equity)} {account.currency}\n"
+        "Bot vyhodnotí každou uzavřenou svíčku; mimo obchodní hodiny čeká. Zastavíš ho klávesami Ctrl+C.",
+        title="Obchodní bot", border_style="red" if brk.is_live and not dry_run else "blue",
+    ))
     stop_event = threading.Event()
     try:
         trading_bot.run_forever(stop_event, on_decisions=show)

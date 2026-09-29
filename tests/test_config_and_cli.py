@@ -51,6 +51,13 @@ def test_sessions():
     from datetime import datetime, timezone
 
     us = SESSIONS["us"]
+    friday_evening = datetime(2026, 9, 25, 21, 0, tzinfo=timezone.utc)
+    assert us.next_open(friday_evening).isoformat() == "2026-09-28T09:30:00-04:00"
+    assert SESSIONS["crypto"].next_open(friday_evening) is None
+    from daytrader.bot import next_market_open
+
+    assert next_market_open(["AAPL", "CEZ.PR"], friday_evening).hour in (9, 3)  # Prague opens first (03:00 NY)
+    assert next_market_open(["AAPL", "BTC-USD"], friday_evening) is None
     assert us.is_open(datetime(2026, 9, 21, 14, 0, tzinfo=timezone.utc))
     assert not us.is_open(datetime(2026, 9, 21, 21, 0, tzinfo=timezone.utc))
     assert us.minutes_to_close(datetime(2026, 9, 21, 19, 50, tzinfo=timezone.utc)) == pytest.approx(10)
@@ -107,3 +114,17 @@ def test_output_survives_legacy_windows_code_page(monkeypatch):
     print("Křížení EMA – strategie")
     legacy.flush()
     assert raw.getvalue().decode("utf-8").startswith("Křížení EMA")
+
+
+def test_cli_bot_uses_bot_settings(monkeypatch):
+    monkeypatch.setenv("DT_DATA_PROVIDER", "demo")
+    monkeypatch.setenv("DT_BOT_STRATEGY", "ema_cross")
+    monkeypatch.setenv("DT_BOT_PARAMS", "fast=5,slow=30")
+    monkeypatch.setenv("DT_BOT_SYMBOLS", "BTC/USDT")
+    get_settings.cache_clear()
+    result = runner.invoke(app, ["bot", "--once", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "BTC/USDT" in result.output and "AAPL" not in result.output
+    settings = get_settings()
+    assert settings.bot_param_dict == {"fast": "5", "slow": "30"}
+    assert "ema_cross" in settings.masked_summary()["Bot"]

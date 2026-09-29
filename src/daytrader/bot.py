@@ -13,7 +13,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -29,8 +29,25 @@ from .strategies import Strategy
 from .timeframes import interval_seconds, interval_timedelta
 
 
+class BotAlreadyRunning(RuntimeError):
+    """Another bot instance is already trading the same account."""
+
+
 def symbol_key(symbol: str) -> str:
     return symbol.upper().replace("/", "").replace("-", "")
+
+
+def next_market_open(symbols: list[str], now: datetime) -> datetime | None:
+    """Earliest upcoming session open among the symbols; ``None`` if any of them trades now."""
+    opens = []
+    for symbol in symbols:
+        session = session_for_symbol(symbol)
+        if session.is_24h or session.is_open(now):
+            return None
+        upcoming = session.next_open(now)
+        if upcoming is not None:
+            opens.append(upcoming)
+    return min(opens) if opens else None
 
 
 @dataclass
@@ -72,7 +89,9 @@ class TradingBot:
         self.config = config
         self.clock = clock
         self._entered_on_bar: dict[str, pd.Timestamp] = {}
+        self._next_eval: dict[str, pd.Timestamp] = {}
         self._loss_logged_on: datetime | None = None
+        self.last_run: datetime | None = None
 
     # -- main loop -------------------------------------------------------------------
     def run_once(self) -> list[Decision]:
@@ -110,6 +129,7 @@ class TradingBot:
                 level = {"error": "error", "blocked": "warning"}.get(decision.action, "info")
                 self.journal.log(decision.message, level, "bot", symbol, ts=now)
             decisions.append(decision)
+        self.last_run = now
         return decisions
 
     def run_forever(
@@ -120,13 +140,22 @@ class TradingBot:
         stop_event = stop_event or threading.Event()
         bar_seconds = interval_seconds(self.config.interval)
         poll = self.config.poll_seconds or min(bar_seconds, 60)
+        account_key = self.broker.account_key
+        instance = uuid.uuid4().hex
+        info = f"{self.strategy.label()} | {', '.join(self.config.symbols)} | {self.config.interval}"
+        holder = self.journal.acquire_bot_lock(account_key, instance, info, datetime.now(timezone.utc))
+        if holder is not None:
+            raise BotAlreadyRunning(
+                f"Na tomto účtu už běží jiný bot ({holder}). Zastav ho, nebo počkej pár minut, "
+                "pokud byl ukončen nečekaně."
+            )
         self.journal.log(
-            f"Bot spuštěn: {self.strategy.label()} | {', '.join(self.config.symbols)} | "
-            f"{self.config.interval} | broker {self.broker.name}{' | SUCHÝ BĚH' if self.config.dry_run else ''}",
+            f"Bot spuštěn: {info} | broker {self.broker.name}{' | SUCHÝ BĚH' if self.config.dry_run else ''}",
             source="bot",
         )
         try:
             while not stop_event.is_set():
+                self.journal.heartbeat_bot_lock(account_key, instance, datetime.now(timezone.utc))
                 try:
                     decisions = self.run_once()
                 except Exception as exc:  # keep running through temporary API/network failures
@@ -138,6 +167,7 @@ class TradingBot:
                 next_run = (now // poll + 1) * poll + 3  # a few seconds after the bar closes
                 stop_event.wait(max(1.0, next_run - now))
         finally:
+            self.journal.release_bot_lock(account_key, instance)
             self.journal.log("Bot zastaven.", source="bot")
 
     # -- per-symbol logic ------------------------------------------------------------------
@@ -161,12 +191,31 @@ class TradingBot:
             self._close(symbol, position, "eod")
             return Decision(symbol, "flatten", f"Konec seance za {minutes_left:.0f} min – pozice uzavřena.")
 
+        step = interval_timedelta(cfg.interval)
+        due = self._next_eval.get(symbol)
+        if due is not None and to_utc(now) < due:
+            # No new bar yet: skip the data download, only watch client-side stops.
+            if side_now and not self.broker.supports_bracket:
+                try:
+                    price = self.provider.get_latest_price(symbol)
+                except DataError:
+                    price = None
+                hit = self._client_side_exit(symbol, side_now, price) if price is not None else None
+                if hit:
+                    self._close(symbol, position, hit)
+                    return Decision(symbol, "exit", f"{'Stop-loss' if hit == 'stop' else 'Take-profit'} zasažen @ {price:.2f}.")
+            return Decision(symbol, "hold", "Čekám na další svíčku.")
+
         bars = drop_incomplete_bar(self.provider.get_bars(symbol, cfg.interval, cfg.lookback), cfg.interval, now)
         if len(bars) < 30:
+            self._next_eval[symbol] = to_utc(now) + step
             return Decision(symbol, "skip", "Málo dat pro výpočet signálu.")
-        age = to_utc(now) - bars.index[-1].tz_convert("UTC") - interval_timedelta(cfg.interval)
-        if age > interval_timedelta(cfg.interval) * cfg.stale_bars:
+        last_bar = bars.index[-1].tz_convert("UTC")
+        if to_utc(now) - last_bar - step > step * cfg.stale_bars:
+            self._next_eval[symbol] = to_utc(now) + step
             return Decision(symbol, "skip", "Poslední svíčka je zastaralá (svátek, přerušený feed?).")
+        # the next bar completes at last_bar + 2 * step; no point downloading data before that
+        self._next_eval[symbol] = last_bar + 2 * step
 
         signals = self.strategy.generate_signals(bars)
         if not (self.risk.config.allow_short and self.broker.supports_short):

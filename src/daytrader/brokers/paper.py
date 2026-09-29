@@ -44,6 +44,8 @@ CREATE INDEX IF NOT EXISTS idx_fills_ts ON fills(ts);
 """
 
 OPEN_STATUSES = (OrderStatus.NEW.value, OrderStatus.PARTIALLY_FILLED.value)
+# One bot cycle asks for the same price several times (account, positions, orders).
+PRICE_CACHE_SECONDS = 15
 
 
 def trigger_price(
@@ -114,7 +116,7 @@ class PaperBroker(Broker):
         self.allow_short = allow_short
         self.fractional = fractional
         self.clock = clock
-        self._prices: dict[str, float] = {}
+        self._prices: dict[str, tuple[float, datetime]] = {}  # last known price and when it was fetched
         with self._tx() as conn:
             conn.executescript(SCHEMA)
             if self._meta(conn, "cash") is None:
@@ -142,13 +144,25 @@ class PaperBroker(Broker):
     def _set_meta(conn: sqlite3.Connection, key: str, value: object) -> None:
         conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, str(value)))
 
+    @property
+    def account_key(self) -> str:
+        return f"paper:{self.db_path.resolve()}"
+
     def _price(self, symbol: str) -> float | None:
+        now = self.clock()
+        cached = self._prices.get(symbol)
+        if cached is not None and abs((now - cached[1]).total_seconds()) < PRICE_CACHE_SECONDS:
+            return cached[0]
         try:
             price = self.provider.get_latest_price(symbol)
         except DataError:
-            return self._prices.get(symbol)
-        self._prices[symbol] = price
+            return cached[0] if cached else None
+        self._prices[symbol] = (price, now)
         return price
+
+    def _known_price(self, symbol: str, fallback: float) -> float:
+        cached = self._prices.get(symbol)
+        return cached[0] if cached else fallback
 
     def _commission(self, qty: float, price: float) -> float:
         fee = qty * self.commission_per_share + qty * price * self.commission_pct / 100
@@ -263,8 +277,8 @@ class PaperBroker(Broker):
             raise BrokerError("Shortování je vypnuté (DT_ALLOW_SHORT=false) – nelze prodat víc, než držíš.")
         cash = float(self._meta(conn, "cash"))
         others = conn.execute("SELECT symbol, qty, avg_price FROM positions WHERE symbol != ?", (symbol,)).fetchall()
-        other_value = sum(r["qty"] * self._prices.get(r["symbol"], r["avg_price"]) for r in others)
-        other_gross = sum(abs(r["qty"]) * self._prices.get(r["symbol"], r["avg_price"]) for r in others)
+        other_value = sum(r["qty"] * self._known_price(r["symbol"], r["avg_price"]) for r in others)
+        other_gross = sum(abs(r["qty"]) * self._known_price(r["symbol"], r["avg_price"]) for r in others)
         equity = cash + other_value + current * price
         if other_gross + abs(new_qty) * price > equity * 1.0001:
             raise BrokerError(

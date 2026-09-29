@@ -104,3 +104,83 @@ def test_execute_plan_refuses_blocked_plan(tmp_path):
     assert not plan.check.allowed
     with pytest.raises(BrokerError):
         execute_plan(broker, plan, journal)
+
+
+class CountingProvider(SyntheticProvider):
+    def __init__(self, now):
+        super().__init__(now=now)
+        self.bar_calls = 0
+
+    def get_bars(self, symbol, interval="5m", period="5d", start=None, end=None):
+        if interval == "5m":
+            self.bar_calls += 1
+        return super().get_bars(symbol, interval, period, start, end)
+
+
+def test_bot_downloads_bars_only_when_a_new_bar_is_due(tmp_path):
+    clock = Clock(MONDAY_0940_NY)
+    provider = CountingProvider(clock)
+    broker = PaperBroker(tmp_path / "paper.db", provider, clock=clock)
+    bot = TradingBot(broker, provider, get_strategy("ema_cross"), RiskManager(), Journal(tmp_path / "j.db"),
+                     BotConfig(symbols=["AAPL"], interval="5m"), clock=clock)
+    bot.run_once()
+    assert provider.bar_calls == 1
+    clock.now += timedelta(minutes=1)  # same bar still forming
+    decisions = bot.run_once()
+    assert provider.bar_calls == 1 and decisions[0].message == "Čekám na další svíčku."
+    clock.now += timedelta(minutes=5)  # a new 5-minute bar has closed
+    bot.run_once()
+    assert provider.bar_calls == 2
+    assert bot.last_run == clock.now
+
+
+def test_only_one_bot_per_account(tmp_path):
+    import threading
+
+    from daytrader.bot import BotAlreadyRunning
+
+    clock, broker, journal, bot = make_env(tmp_path)
+    now = datetime.now(timezone.utc)
+    assert journal.acquire_bot_lock(broker.account_key, "other", "bot z bot.bat", now) is None
+    assert journal.bot_lock_holder(broker.account_key, now) == "bot z bot.bat"
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(BotAlreadyRunning):
+        bot.run_forever(stop)
+    # a lock without heartbeat for a while (crashed bot) is taken over
+    later = now + timedelta(minutes=10)
+    assert journal.bot_lock_holder(broker.account_key, later) is None
+    assert journal.acquire_bot_lock(broker.account_key, "mine", "nový bot", later) is None
+    journal.release_bot_lock(broker.account_key, "mine")
+    assert journal.bot_lock_holder(broker.account_key, later) is None
+
+
+def test_run_forever_releases_lock(tmp_path):
+    import threading
+
+    clock, broker, journal, bot = make_env(tmp_path)
+    stop = threading.Event()
+    stop.set()
+    bot.run_forever(stop)
+    assert journal.bot_lock_holder(broker.account_key, datetime.now(timezone.utc)) is None
+
+
+def test_paper_price_cache_follows_broker_clock(tmp_path):
+    clock = Clock(MONDAY_0940_NY)
+
+    class Prices(SyntheticProvider):
+        calls = 0
+
+        def get_latest_price(self, symbol):
+            Prices.calls += 1
+            return super().get_latest_price(symbol)
+
+    broker = PaperBroker(tmp_path / "p.db", Prices(now=clock), clock=clock)
+    broker.get_account()
+    broker.submit_order(OrderRequest("AAPL", Side.BUY, 1))
+    broker.get_positions()
+    broker.get_positions()
+    assert Prices.calls == 1
+    clock.now += timedelta(minutes=1)
+    broker.get_positions()
+    assert Prices.calls == 2

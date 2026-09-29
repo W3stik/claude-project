@@ -50,6 +50,10 @@ class CCXTBroker(Broker):
         self.min_position_value = min_position_value
         self._markets: dict[str, Any] | None = None
 
+    @property
+    def account_key(self) -> str:
+        return f"ccxt:{self.exchange.id}:{'live' if self.is_live else 'sandbox'}"
+
     def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
         try:
             return getattr(self.exchange, method)(*args, **kwargs)

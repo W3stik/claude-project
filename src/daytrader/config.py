@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     take_profit_r: float = 2.0
     allow_short: bool = False
 
+    # --- automatic bot (daytrader bot / bot.bat) ----------------------------
+    bot_strategy: str = "vwap_trend"
+    bot_interval: str = "5m"
+    bot_symbols: str = ""  # empty = DT_WATCHLIST
+    bot_params: str = ""  # e.g. "fast=9,slow=21"
+
     # --- Alpaca --------------------------------------------------------------
     alpaca_api_key: SecretStr | None = Field(None, validation_alias=_alias("ALPACA_API_KEY", "alpaca_api_key"))
     alpaca_secret_key: SecretStr | None = Field(
@@ -91,7 +97,7 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("data_provider", "broker", "ccxt_exchange", "ai_effort", mode="before")
+    @field_validator("data_provider", "broker", "ccxt_exchange", "ai_effort", "bot_strategy", mode="before")
     @classmethod
     def _lower(cls, value: object) -> object:
         return value.strip().lower() if isinstance(value, str) else value
@@ -99,6 +105,19 @@ class Settings(BaseSettings):
     @property
     def watchlist_symbols(self) -> list[str]:
         return parse_symbols(self.watchlist)
+
+    @property
+    def bot_symbol_list(self) -> list[str]:
+        return parse_symbols(self.bot_symbols) or self.watchlist_symbols
+
+    @property
+    def bot_param_dict(self) -> dict[str, str]:
+        params: dict[str, str] = {}
+        for part in self.bot_params.replace(";", ",").split(","):
+            if "=" in part:
+                key, value = part.split("=", 1)
+                params[key.strip()] = value.strip()
+        return params
 
     @property
     def has_alpaca(self) -> bool:
@@ -132,6 +151,7 @@ class Settings(BaseSettings):
             "Max. pozice": f"{self.max_position_pct} % kapitálu",
             "Max. otevřených pozic": str(self.max_open_positions),
             "Shortování": "povoleno" if self.allow_short else "zakázáno",
+            "Bot": f"{self.bot_strategy} · {self.bot_interval} · {', '.join(self.bot_symbol_list)}",
             "Alpaca klíč": mask(self.alpaca_api_key),
             "Alpaca režim": "paper" if self.alpaca_paper else "LIVE",
             "CCXT burza": f"{self.ccxt_exchange} ({'testnet' if self.ccxt_sandbox else 'LIVE'})",

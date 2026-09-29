@@ -71,6 +71,11 @@ class Broker(ABC):
                 closed.append(order)
         return closed
 
+    @property
+    def account_key(self) -> str:
+        """Identifies the trading account (one bot per account)."""
+        return f"{self.name}:{'live' if self.is_live else 'paper'}"
+
     def sync(self) -> None:
         """Process pending simulated orders (paper broker); no-op for real brokers."""
 

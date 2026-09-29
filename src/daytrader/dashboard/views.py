@@ -12,7 +12,7 @@ from ..analysis.indicators import add_indicators
 from ..analysis.snapshot import build_snapshot
 from ..backtest import EXIT_REASONS, BacktestConfig, grid_search, run_backtest
 from ..backtest.metrics import METRIC_LABELS, format_metric
-from ..bot import BotConfig, TradingBot
+from ..bot import BotConfig, TradingBot, next_market_open
 from ..brokers import create_broker
 from ..brokers.paper import PaperBroker
 from ..config import parse_symbols
@@ -36,6 +36,7 @@ from .common import (
     guard,
     load_bars,
     load_news,
+    local_dt,
     local_time,
     polarity,
     provider_name,
@@ -534,58 +535,122 @@ def _order_ticket(broker) -> None:
 # ---------------------------------------------------------------------------------------
 # Bot
 # ---------------------------------------------------------------------------------------
+BOT_INTERVALS = ["1m", "5m", "15m", "30m", "1h"]
+BOT_MODES = {
+    "trade": "Obchodovat (papírový / testovací účet)",
+    "watch": "Jen sledovat – nic neposílat",
+}
+
+
 def bot_page() -> None:
     st.title("Obchodní bot")
     st.caption(
-        "Bot každou svíčku vyhodnotí strategii a obchoduje podle stejných pravidel jako backtest: vstup jen na nový signál, "
-        "stop-loss a take-profit z ATR, limity rizika, uzavření pozic před koncem seance."
+        "Bot po každé uzavřené svíčce vyhodnotí strategii a obchoduje podle stejných pravidel jako backtest: vstup jen "
+        "na nový signál, stop-loss a take-profit z ATR, limity rizika a uzavření pozic 5 minut před koncem obchodování."
     )
     runner = bot_runner()
     cfg = settings()
+    with guard():
+        broker = get_broker(broker_name(), provider_name())
     if runner.running:
-        st.success(f"Bot běží od {runner.started_at:%H:%M:%S}: {runner.label}", icon="🤖")
-        if st.button("Zastavit bota", type="primary"):
-            runner.stop()
-            st.rerun()
+        _bot_status(runner)
     else:
-        with st.form("bot"):
-            c1, c2 = st.columns([3, 1])
-            symbols_text = c1.text_input("Symboly", value=", ".join(cfg.watchlist_symbols[:4]))
-            interval = c2.selectbox("Interval", ["1m", "5m", "15m", "30m", "1h"], index=1)
-            strategy_key = st.selectbox("Strategie", list(STRATEGIES), format_func=lambda k: STRATEGIES[k].name,
-                                        index=list(STRATEGIES).index("vwap_trend"))
-            dry_run = st.toggle("Suchý běh (jen vypisovat rozhodnutí, neposílat příkazy)", value=True)
-            start = st.form_submit_button("Spustit bota", type="primary")
-        st.caption(f"Broker: **{broker_name()}** · zdroj dat: **{provider_name()}** · parametry strategie jsou výchozí.")
-        if start:
-            with guard():
-                provider = create_provider(provider_name(), cfg)
-                broker = create_broker(broker_name(), cfg, provider=provider)
-                if broker.is_live and not dry_run:
-                    raise ValueError("Živého bota spouštěj z příkazové řádky (daytrader bot), kde se potvrzuje ručně.")
-                symbols = parse_symbols(symbols_text)
-                strategy = get_strategy(strategy_key)
-                bot = TradingBot(broker, provider, strategy, _risk(), Journal(cfg.ensure_data_dir() / "journal.db"),
-                                 BotConfig(symbols=symbols, interval=interval, dry_run=dry_run))
-                runner.start(bot, f"{strategy.label()} · {', '.join(symbols)} · {interval}{' · suchý běh' if dry_run else ''}")
-            st.rerun()
+        other = get_journal().bot_lock_holder(broker.account_key, datetime.now(timezone.utc))
+        if other:
+            st.warning(f"Na tomto účtu už běží jiný bot (např. z bot.bat): {other}. Jeho obchody vidíš níže a v Deníku.")
+        _bot_form(runner, broker, cfg, blocked=bool(other))
     if runner.last_error:
         st.error(runner.last_error)
 
     @st.fragment(run_every="15s")
-    def decisions() -> None:
+    def live() -> None:
+        with guard():
+            account = broker.get_account()
+            positions = broker.get_positions()
+        cols = st.columns(3)
+        cols[0].metric("Kapitál", fmt(account.equity), border=True)
+        cols[1].metric("Dnešní P/L", fmt(account.day_pnl),
+                       f"{account.day_pnl_pct:+.2f} %" if account.day_pnl_pct is not None else None,
+                       delta_color=polarity(account.day_pnl), border=True)
+        cols[2].metric("Otevřené pozice", len(positions), border=True)
+        if positions:
+            frame = pd.DataFrame([p.to_row() for p in positions]).rename(columns={
+                "symbol": "Symbol", "side": "Směr", "qty": "Množství", "avg_price": "Prům. cena",
+                "current_price": "Aktuální", "market_value": "Hodnota", "unrealized_pnl": "P/L", "unrealized_pnl_pct": "P/L %",
+            })
+            st.dataframe(frame, hide_index=True, column_config={
+                c: st.column_config.NumberColumn(format="%.2f") for c in ("Prům. cena", "Aktuální", "Hodnota", "P/L", "P/L %")
+            })
         st.subheader("Rozhodnutí bota")
         if runner.decisions:
             frame = pd.DataFrame(
-                [(ts.strftime("%H:%M:%S"), d.symbol, d.action, d.message) for ts, d in runner.decisions],
+                [(local_dt(ts).strftime("%d.%m. %H:%M:%S"), d.symbol, d.action, d.message) for ts, d in runner.decisions],
                 columns=["Čas", "Symbol", "Akce", "Zpráva"],
             )
             st.dataframe(frame, hide_index=True)
         else:
-            st.caption("Zatím žádná rozhodnutí (bot vypisuje jen vstupy, výstupy, blokace a chyby).")
+            st.caption("Zatím žádná rozhodnutí. Bot vypisuje vstupy, výstupy, blokace a chyby; kompletní historie je v Deníku.")
 
-    decisions()
-    st.info("Bot běží jen dokud běží tento dashboard. Pro dlouhodobý běh použij příkaz `daytrader bot` v terminálu.", icon="ℹ️")
+    live()
+    st.info(
+        "**Tipy:** Americký trh je otevřený po–pá 15:30–22:00 našeho času, mimo tuto dobu bot čeká. "
+        "Chceš-li bota vyzkoušet hned, přidej krypto (např. BTC-USD), které se obchoduje nonstop. "
+        "Bot běží jen dokud běží dashboard. Pro samostatný běh použij `bot.bat` "
+        "(nastavení v souboru `.env`, řádky `DT_BOT_...`).",
+        icon="ℹ️",
+    )
+
+
+def _bot_status(runner) -> None:
+    bot = runner.bot
+    st.success(f"Bot běží od {local_dt(runner.started_at):%d.%m. %H:%M}: {runner.label}", icon="🤖")
+    opening = next_market_open(bot.config.symbols, datetime.now(timezone.utc))
+    c1, c2 = st.columns(2)
+    c1.metric("Poslední kontrola", local_dt(bot.last_run).strftime("%H:%M:%S") if bot.last_run else "—", border=True)
+    c2.metric("Trh", "otevřený" if opening is None else f"otevře {local_dt(opening):%d.%m. %H:%M}", border=True)
+    if st.button("Zastavit bota", type="primary"):
+        runner.stop()
+        st.rerun()
+
+
+def _bot_form(runner, broker, cfg, blocked: bool) -> None:
+    c1, c2 = st.columns([3, 1])
+    symbols_text = c1.text_input(
+        "Symboly", value=", ".join(cfg.bot_symbol_list),
+        help="Americké akcie (AAPL), pražská burza (CEZ.PR), krypto (BTC-USD) – krypto se obchoduje nonstop.",
+    )
+    interval = c2.selectbox("Interval", BOT_INTERVALS,
+                            index=BOT_INTERVALS.index(cfg.bot_interval) if cfg.bot_interval in BOT_INTERVALS else 1)
+    keys = list(STRATEGIES)
+    strategy_key = st.selectbox("Strategie", keys, format_func=lambda k: STRATEGIES[k].name,
+                                index=keys.index(cfg.bot_strategy) if cfg.bot_strategy in keys else keys.index("vwap_trend"))
+    st.caption(STRATEGIES[strategy_key].description)
+    with st.expander("Parametry strategie"):
+        params = _strategy_params(strategy_key, "bot")
+    mode = st.radio("Režim", list(BOT_MODES), format_func=BOT_MODES.get, horizontal=True,
+                    index=1 if broker.is_live else 0)
+    if broker.is_live:
+        st.error("Vybraný broker je ŽIVÝ účet. Z dashboardu jde bot spustit jen v režimu „Jen sledovat“; "
+                 "živé obchodování spouštěj z příkazové řádky, kde se potvrzuje ručně.")
+    st.caption(
+        f"Broker **{broker_name()}** · zdroj dat **{provider_name()}** · riziko {cfg.risk_per_trade_pct:g} % na obchod · "
+        f"max. {cfg.max_open_positions} pozice · denní limit ztráty {cfg.max_daily_loss_pct:g} %"
+    )
+    if st.button("Spustit bota", type="primary", disabled=blocked or (broker.is_live and mode == "trade")):
+        with guard():
+            symbols = parse_symbols(symbols_text)
+            if not symbols:
+                raise ValueError("Zadej aspoň jeden symbol.")
+            dry_run = mode == "watch"
+            provider = create_provider(provider_name(), cfg)
+            bot_broker = create_broker(broker_name(), cfg, provider=provider)
+            if bot_broker.is_live and not dry_run:
+                raise ValueError("Živého bota spouštěj z příkazové řádky (daytrader bot), kde se potvrzuje ručně.")
+            strategy = get_strategy(strategy_key, **params)
+            bot = TradingBot(bot_broker, provider, strategy, _risk(), Journal(cfg.ensure_data_dir() / "journal.db"),
+                             BotConfig(symbols=symbols, interval=interval, dry_run=dry_run))
+            runner.start(bot, f"{strategy.label()} · {', '.join(symbols)} · {interval}{' · jen sledování' if dry_run else ''}")
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------------------
