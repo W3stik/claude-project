@@ -92,3 +92,18 @@ def test_cli_reports_errors_nicely(demo_env):
     result = runner.invoke(app, ["backtest", "AAPL", "-s", "does_not_exist"])
     assert result.exit_code == 1
     assert "Chyba" in result.output
+
+
+def test_output_survives_legacy_windows_code_page(monkeypatch):
+    import io
+    import sys
+
+    from daytrader.cli import ensure_utf8_output
+
+    raw = io.BytesIO()
+    legacy = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", legacy)
+    ensure_utf8_output()
+    print("Křížení EMA – strategie")
+    legacy.flush()
+    assert raw.getvalue().decode("utf-8").startswith("Křížení EMA")

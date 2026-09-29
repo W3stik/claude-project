@@ -35,6 +35,20 @@ from .scanner import scan as run_scan
 from .strategies import STRATEGIES, get_strategy
 from .trading import OrderPlan, execute_plan, plan_order
 
+
+def ensure_utf8_output() -> None:
+    """Czech text must not crash when stdout uses a legacy Windows code page (pipes, Git Bash, CI)."""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
+ensure_utf8_output()
+
 app = typer.Typer(
     help="Day trading nástroj: analýzy, scanner, backtesty a obchodování (papírové i přes API).",
     no_args_is_help=True,
