@@ -145,6 +145,7 @@ svíčky za posledních 60 dní. Aplikace období sama zkrátí a upozorní na t
 3. `daytrader account` ověří spojení.
 
 Alpaca podporuje **bracket příkazy**: stop-loss a take-profit hlídá server, i když máš počítač vypnutý.
+U krypta (`BTC/USD`) je Alpaca nepovoluje, takže je hlídá bot a krypto tam jde jen nakupovat (bez shortu).
 Bezplatná data IEX obsahují jen část celkového objemu trhu, takže VWAP a relativní objem jsou orientační.
 
 ### Kryptoburzy přes CCXT
@@ -235,8 +236,25 @@ Bot obchoduje sám. Výchozí je **papírový účet**, tedy falešné peníze b
 - Na jednom účtu smí běžet jen jeden bot. Druhý (např. současně z `bot.bat` i z dashboardu) se nespustí.
 - Všechno zapisuje do deníku (stránka *Deník*, `daytrader journal`).
 
-**Kdy obchoduje:** americké akcie po–pá 15:30–22:00 našeho času, pražská burza 9:00–16:20.
-Krypto (`BTC-USD`, `ETH-USD`) se obchoduje nonstop, hodí se na vyzkoušení bota i večer a o víkendu.
+**Kde a kdy obchoduje** (náš čas; časová pásma i letní čas si bot hlídá sám):
+
+| Trh | Symboly | Obchodní hodiny | Data z Yahoo |
+|---|---|---|---|
+| USA – NYSE, Nasdaq | `AAPL`, `MSFT`, `SPY` | po–pá 15:30–22:00* | v reálném čase |
+| Burza cenných papírů Praha | `CEZ.PR`, `KOMB.PR`, `MONET.PR` | po–pá 9:00–16:20 | zpožděná o 20 min |
+| Xetra (Frankfurt) | `SAP.DE`, `SIE.DE` | po–pá 9:00–17:30 | zpožděná |
+| London Stock Exchange | `VOD.L`, `HSBA.L` | po–pá 9:00–17:30 | zpožděná |
+| Krypto | `BTC-USD`, `ETH-USD` (přes CCXT `BTC/USDT`) | nonstop, i o víkendu | v reálném čase |
+
+\* Na přelomu října a listopadu (asi týden) a v březnu (asi tři týdny) začíná o hodinu dřív,
+protože USA mění čas v jiný den než Evropa.
+
+U zpožděných dat bot vyhodnocuje jen svíčky, které jsou u zdroje už uzavřené, takže reaguje
+o to zpoždění později. Na papírovém účtu to nevadí, na skutečné peníze to vhodné není.
+Svátky bot nezná, ale pozná je podle toho, že nepřibývají nová data, a ten den neobchoduje.
+Jiné burzy (např. Vídeň `.VI`, Varšava `.WA`, Paříž `.PA`) aplikace zatím nezná a bot by
+u nich počítal s americkými hodinami, takže mu je nedávej. Krypto se hodí na vyzkoušení bota
+i večer a o víkendu.
 
 **Aby běžel každý den sám:** stiskni Win+R, napiš `shell:startup` a do otevřené složky vlož zástupce na `bot.bat`.
 Bot se pak spustí po každém přihlášení do Windows. Počítač nesmí během obchodních hodin usnout

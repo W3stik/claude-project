@@ -9,6 +9,7 @@ from daytrader.data.synthetic import SyntheticProvider
 from daytrader.journal import Journal, round_trips
 from daytrader.models import OrderRequest, Side
 from daytrader.risk import RiskConfig, RiskManager
+from daytrader.sessions import is_crypto_symbol
 from daytrader.strategies import get_strategy
 from daytrader.trading import execute_plan, plan_order
 
@@ -184,3 +185,130 @@ def test_paper_price_cache_follows_broker_clock(tmp_path):
     clock.now += timedelta(minutes=1)
     broker.get_positions()
     assert Prices.calls == 2
+
+
+class AlpacaLikeCrypto(PaperBroker):
+    """Like Alpaca: crypto orders cannot carry stop-loss/take-profit legs and cannot go short."""
+
+    def supports_bracket_for(self, symbol):
+        return not is_crypto_symbol(symbol)
+
+    def supports_short_for(self, symbol):
+        return not is_crypto_symbol(symbol)
+
+    def submit_order(self, request):
+        if is_crypto_symbol(request.symbol) and (request.stop_loss or request.take_profit):
+            raise BrokerError("Alpaca nepodporuje bracket příkazy pro krypto.")
+        return super().submit_order(request)
+
+
+def test_bot_trades_crypto_where_the_broker_has_no_brackets(tmp_path):
+    clock = Clock(MONDAY_0940_NY)
+    provider = SyntheticProvider(now=clock)
+    broker = AlpacaLikeCrypto(tmp_path / "paper.db", provider, clock=clock, allow_short=True)
+    journal = Journal(tmp_path / "journal.db")
+    bot = TradingBot(
+        broker, provider, get_strategy("ema_cross"),
+        RiskManager(RiskConfig(allow_short=True, max_trades_per_day=50)), journal,
+        BotConfig(symbols=["BTC/USD", "AAPL"], interval="5m"), clock=clock,
+    )
+    entered = None
+    for _ in range(200):
+        clock.now += timedelta(minutes=5)
+        decisions = {d.symbol: d for d in bot.run_once()}
+        assert decisions["BTC/USD"].action != "error", decisions["BTC/USD"].message
+        if decisions["BTC/USD"].action.startswith("enter"):
+            entered = decisions["BTC/USD"]
+            break
+    assert entered is not None and entered.action == "enter_long"  # long only: no crypto shorts
+    assert not any(o.parent_id and o.symbol == "BTC/USD" for o in broker.get_orders("all", limit=1000))
+    state = journal.get_state("BTC/USD")
+    assert state["stop"] is not None and state["target"] is not None  # watched by the bot itself
+    # the bot closes the position itself once the price crosses the stop
+    journal.set_state("BTC/USD", "long", state["entry"], provider.get_latest_price("BTC/USD") * 1.5, None)
+    clock.now += timedelta(minutes=1)
+    decision = next(d for d in bot.run_once() if d.symbol == "BTC/USD")
+    assert decision.action == "exit" and "Stop-loss" in decision.message
+    assert broker.get_position("BTC/USD") is None
+
+
+MONDAY_0900_PRAGUE = datetime(2026, 9, 21, 7, 0, 5, tzinfo=timezone.utc)
+
+
+def delayed_bot(tmp_path, delay):
+    """Bot on a feed that trails the clock like Yahoo's Prague data (20 minutes)."""
+    clock = Clock(MONDAY_0900_PRAGUE)
+    provider = SyntheticProvider(now=lambda: clock.now - delay)
+    broker = PaperBroker(tmp_path / "paper.db", provider, clock=clock)
+    strategy = get_strategy("ema_cross")
+    seen = []
+    original = strategy.generate_signals
+
+    def recording(bars):
+        seen.append((clock.now, bars.index[-1]))
+        return original(bars)
+
+    strategy.generate_signals = recording
+    bot = TradingBot(broker, provider, strategy, RiskManager(RiskConfig(max_trades_per_day=50)),
+                     Journal(tmp_path / "journal.db"), BotConfig(symbols=["CEZ.PR"], interval="5m"), clock=clock)
+    return clock, broker, bot, seen
+
+
+def test_bot_trades_on_a_delayed_feed(tmp_path):
+    delay = timedelta(minutes=20)
+    clock, broker, bot, seen = delayed_bot(tmp_path, delay)
+    actions, stale = [], []
+    for _ in range(7 * 60 + 20):  # 9:00-16:20 Prague, polled every minute
+        for decision in bot.run_once():
+            actions.append(decision)
+            if "zastaralá" in decision.message:
+                stale.append(clock.now)
+        clock.now += timedelta(minutes=1)
+    assert any(a.action.startswith("enter") for a in actions)
+    # stale only until the first bar of the day has closed at the source (9:05 + 20 min)
+    assert stale and max(stale) < MONDAY_0900_PRAGUE + timedelta(minutes=25)
+    # only bars that are complete at the source are evaluated, never the one still forming,
+    # and never yesterday's last bar
+    assert seen and all(last + timedelta(minutes=5) <= now - delay for now, last in seen)
+    assert all(last >= MONDAY_0900_PRAGUE.replace(second=0) for _, last in seen)
+    assert len({last for _, last in seen}) == len(seen)  # each bar once, although polled every minute
+    assert broker.get_positions() == []  # flattened before the 16:20 close
+
+
+def test_bot_still_skips_a_feed_that_stopped(tmp_path):
+    clock, _, bot, _ = delayed_bot(tmp_path, timedelta(hours=3))  # e.g. a holiday: last bars are old
+    clock.now += timedelta(hours=3)
+    decision = bot.run_once()[0]
+    assert decision.action == "skip" and "zastaralá" in decision.message
+
+
+def test_bot_never_goes_back_to_an_older_bar_on_a_quiet_feed(tmp_path):
+    from daytrader.timeframes import interval_timedelta
+
+    clock = Clock(MONDAY_0940_NY)
+    quiet_bar = datetime(2026, 9, 21, 13, 45, tzinfo=timezone.utc)  # 9:45 NY: no trades at all
+
+    class Quiet(SyntheticProvider):
+        """Only bars with trades exist, and a new bar appears only with its first trade."""
+
+        def get_bars(self, symbol, interval="5m", period="5d", start=None, end=None):
+            bars = super().get_bars(symbol, interval, period, start, end)
+            complete = bars.index + interval_timedelta(interval) <= clock.now
+            return bars[complete & (bars.index != quiet_bar)]
+
+    provider = Quiet(now=clock)
+    strategy = get_strategy("ema_cross")
+    seen = []
+    original = strategy.generate_signals
+
+    def recording(bars):
+        seen.append(bars.index[-1])
+        return original(bars)
+
+    strategy.generate_signals = recording
+    bot = TradingBot(PaperBroker(tmp_path / "paper.db", provider, clock=clock), provider, strategy, RiskManager(),
+                     Journal(tmp_path / "journal.db"), BotConfig(symbols=["AAPL"], interval="5m"), clock=clock)
+    for _ in range(30):
+        bot.run_once()
+        clock.now += timedelta(minutes=1)
+    assert len(seen) > 3 and seen == sorted(set(seen))

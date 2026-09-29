@@ -110,6 +110,13 @@ class AlpacaBroker(Broker):
         return bool(clock.get("is_open")) if clock else None
 
     # -- orders --------------------------------------------------------------------------
+    # Alpaca has no bracket/OTO orders and no short selling for crypto.
+    def supports_bracket_for(self, symbol: str) -> bool:
+        return self.supports_bracket and not is_crypto_symbol(symbol)
+
+    def supports_short_for(self, symbol: str) -> bool:
+        return self.supports_short and not is_crypto_symbol(symbol)
+
     def build_order_payload(self, request: OrderRequest) -> dict[str, Any]:
         crypto = is_crypto_symbol(request.symbol)
         payload: dict[str, Any] = {

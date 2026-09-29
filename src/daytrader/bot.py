@@ -28,6 +28,10 @@ from .sessions import is_crypto_symbol, session_for_symbol
 from .strategies import Strategy
 from .timeframes import interval_seconds, interval_timedelta
 
+# A feed that trails the clock by more than this is treated as delayed (Yahoo publishes
+# Prague and other European exchanges 15-20 minutes late).
+FEED_LAG_TOLERANCE = pd.Timedelta(minutes=1)
+
 
 class BotAlreadyRunning(RuntimeError):
     """Another bot instance is already trading the same account."""
@@ -58,6 +62,7 @@ class BotConfig:
     flatten_minutes_before_close: float = 5.0
     no_entry_minutes_before_close: float = 15.0
     stale_bars: int = 3
+    max_feed_delay_minutes: float = 30.0
     poll_seconds: int | None = None
     dry_run: bool = False
 
@@ -90,6 +95,7 @@ class TradingBot:
         self.clock = clock
         self._entered_on_bar: dict[str, pd.Timestamp] = {}
         self._next_eval: dict[str, pd.Timestamp] = {}
+        self._evaluated_bar: dict[str, pd.Timestamp] = {}
         self._loss_logged_on: datetime | None = None
         self.last_run: datetime | None = None
 
@@ -195,30 +201,33 @@ class TradingBot:
         due = self._next_eval.get(symbol)
         if due is not None and to_utc(now) < due:
             # No new bar yet: skip the data download, only watch client-side stops.
-            if side_now and not self.broker.supports_bracket:
-                try:
-                    price = self.provider.get_latest_price(symbol)
-                except DataError:
-                    price = None
-                hit = self._client_side_exit(symbol, side_now, price) if price is not None else None
-                if hit:
-                    self._close(symbol, position, hit)
-                    return Decision(symbol, "exit", f"{'Stop-loss' if hit == 'stop' else 'Take-profit'} zasažen @ {price:.2f}.")
-            return Decision(symbol, "hold", "Čekám na další svíčku.")
+            return self._watch_stops(symbol, side_now, position) or Decision(symbol, "hold", "Čekám na další svíčku.")
 
-        bars = drop_incomplete_bar(self.provider.get_bars(symbol, cfg.interval, cfg.lookback), cfg.interval, now)
+        bars = self.provider.get_bars(symbol, cfg.interval, cfg.lookback)
+        # On a delayed feed the newest bar is still forming at the source even though, by the
+        # clock, it should have closed already.
+        delayed = len(bars) > 0 and to_utc(now) - bars.index[-1].tz_convert("UTC") - step > FEED_LAG_TOLERANCE
+        bars = drop_incomplete_bar(bars, cfg.interval, now)
+        if delayed:
+            bars = bars.iloc[:-1]
         if len(bars) < 30:
             self._next_eval[symbol] = to_utc(now) + step
             return Decision(symbol, "skip", "Málo dat pro výpočet signálu.")
         last_bar = bars.index[-1].tz_convert("UTC")
-        if to_utc(now) - last_bar - step > step * cfg.stale_bars:
+        stale_after = max(step * cfg.stale_bars, pd.Timedelta(minutes=cfg.max_feed_delay_minutes))
+        if to_utc(now) - last_bar - step > stale_after:
             self._next_eval[symbol] = to_utc(now) + step
             return Decision(symbol, "skip", "Poslední svíčka je zastaralá (svátek, přerušený feed?).")
-        # the next bar completes at last_bar + 2 * step; no point downloading data before that
-        self._next_eval[symbol] = last_bar + 2 * step
+        # The next bar completes at last_bar + 2 * step; no point downloading data before that.
+        # A delayed feed publishes it at an unknown moment within the next step: check every poll.
+        self._next_eval[symbol] = to_utc(now) if delayed else last_bar + 2 * step
+        evaluated = self._evaluated_bar.get(symbol)
+        if evaluated is not None and last_bar <= evaluated:  # each bar once, never an older one
+            return self._watch_stops(symbol, side_now, position) or Decision(symbol, "hold", "Čekám na další svíčku.")
+        self._evaluated_bar[symbol] = last_bar
 
         signals = self.strategy.generate_signals(bars)
-        if not (self.risk.config.allow_short and self.broker.supports_short):
+        if not (self.risk.config.allow_short and self.broker.supports_short_for(symbol)):
             signals = signals.clip(lower=0)
         signal, previous = int(signals.iloc[-1]), int(signals.iloc[-2])
         bar_time = bars.index[-1]
@@ -228,7 +237,7 @@ class TradingBot:
         except DataError:
             pass
 
-        if side_now and not self.broker.supports_bracket:
+        if side_now and not self.broker.supports_bracket_for(symbol):
             hit = self._client_side_exit(symbol, side_now, price)
             if hit:
                 self._close(symbol, position, hit)
@@ -276,7 +285,7 @@ class TradingBot:
         if self.config.dry_run:
             self._entered_on_bar[symbol] = bar_time
             return Decision(symbol, f"enter_{label}", f"[SUCHÝ BĚH] Vstup {plan}", check.warnings)
-        bracket = self.broker.supports_bracket
+        bracket = self.broker.supports_bracket_for(symbol)
         order = self.broker.submit_order(
             OrderRequest(
                 symbol=symbol,
@@ -297,6 +306,20 @@ class TradingBot:
         if not bracket:
             self.journal.set_state(symbol, label, price, stop, target)
         return Decision(symbol, f"enter_{label}", f"Vstup {plan}", check.warnings)
+
+    def _watch_stops(self, symbol: str, side: int, position: Position | None) -> Decision | None:
+        """Between bars: exit at the stop-loss/take-profit the bot watches itself (no bracket orders)."""
+        if not side or self.broker.supports_bracket_for(symbol):
+            return None
+        try:
+            price = self.provider.get_latest_price(symbol)
+        except DataError:
+            return None
+        hit = self._client_side_exit(symbol, side, price)
+        if not hit:
+            return None
+        self._close(symbol, position, hit)
+        return Decision(symbol, "exit", f"{'Stop-loss' if hit == 'stop' else 'Take-profit'} zasažen @ {price:.2f}.")
 
     def _client_side_exit(self, symbol: str, side: int, price: float) -> str | None:
         state = self.journal.get_state(symbol)

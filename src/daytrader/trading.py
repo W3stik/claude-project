@@ -126,7 +126,7 @@ def plan_order(
             start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             trades_today = journal.entries_since(start, broker.name)
         check = risk.check_new_trade(account, positions, symbol, side, qty, entry, stop, trades_today)
-        if (stop is not None or target is not None) and not broker.supports_bracket:
+        if (stop is not None or target is not None) and not broker.supports_bracket_for(symbol):
             notes.append(f"{broker.name} nepodporuje bracket příkazy – stop-loss/take-profit hlídej ručně nebo botem.")
 
     return OrderPlan(
@@ -150,7 +150,7 @@ def execute_plan(broker: Broker, plan: OrderPlan, journal: Journal | None = None
         raise BrokerError("Příkaz neprošel kontrolou rizika: " + " ".join(plan.check.reasons))
     if plan.qty <= 0:
         raise BrokerError("Množství musí být kladné.")
-    bracket = broker.supports_bracket and not plan.reduces_position
+    bracket = broker.supports_bracket_for(plan.symbol) and not plan.reduces_position
     order = broker.submit_order(
         OrderRequest(
             symbol=plan.symbol,

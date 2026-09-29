@@ -37,7 +37,7 @@ class SyntheticProvider(DataProvider):
         self._now = now or utcnow
         self.daily_vol = daily_vol
         self.daily_drift = daily_drift
-        self._daily_cache: dict[str, pd.Series] = {}
+        self._daily_cache: dict[str, tuple[date, pd.Series]] = {}
         self._minute_cache: dict[tuple[str, date], pd.DataFrame] = {}
 
     # -- path generation -----------------------------------------------------
@@ -48,14 +48,14 @@ class SyntheticProvider(DataProvider):
     def _daily_closes(self, symbol: str, session: MarketSession) -> pd.Series:
         until = to_utc(self._now()).date() + timedelta(days=2)
         cached = self._daily_cache.get(symbol)
-        if cached is not None and cached.index[-1].date() >= until - timedelta(days=3):
-            return cached
+        if cached is not None and cached[0] == until:  # extend the path when the clock moves on a day
+            return cached[1]
         rng = np.random.default_rng(_seed(symbol, "daily"))
         days = self._trading_days(session, until)
         base = 20 + (_seed(symbol, "base") % 480)
         returns = rng.normal(self.daily_drift, self.daily_vol, len(days))
         closes = pd.Series(base * np.exp(np.cumsum(returns)), index=days)
-        self._daily_cache[symbol] = closes
+        self._daily_cache[symbol] = (until, closes)
         return closes
 
     def _minute_bars(self, symbol: str, day: pd.Timestamp, session: MarketSession) -> pd.DataFrame:

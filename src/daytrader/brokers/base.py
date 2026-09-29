@@ -71,6 +71,13 @@ class Broker(ABC):
                 closed.append(order)
         return closed
 
+    def supports_bracket_for(self, symbol: str) -> bool:
+        """Can stop-loss/take-profit legs ride along with an entry order for ``symbol``?"""
+        return self.supports_bracket
+
+    def supports_short_for(self, symbol: str) -> bool:
+        return self.supports_short
+
     @property
     def account_key(self) -> str:
         """Identifies the trading account (one bot per account)."""

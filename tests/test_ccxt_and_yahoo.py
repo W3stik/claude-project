@@ -132,3 +132,19 @@ def test_yahoo_news_both_formats():
     assert news[0].source == "Reuters" and news[0].url == "https://example.com/a"
     assert news[1].published == datetime.fromtimestamp(1790000000, tz=timezone.utc)
     assert parse_yahoo_news({"content": {}}) is None
+
+
+def test_demo_data_keeps_working_when_the_clock_moves_on():
+    from datetime import timedelta
+
+    from daytrader.data.synthetic import SyntheticProvider
+
+    from .conftest import Clock
+
+    clock = Clock(datetime(2026, 9, 21, 15, 0, tzinfo=timezone.utc))  # Monday
+    provider = SyntheticProvider(now=clock)
+    monday = provider.get_bars("AAPL", "5m", "1d").iloc[:-1]  # the last bar is still forming
+    clock.now += timedelta(days=3)  # Thursday, same process (dashboard or bot left running)
+    week = provider.get_bars("AAPL", "5m", "5d")
+    assert week.index[-1].date() == clock.now.date()
+    assert (week.loc[monday.index, "close"] - monday["close"]).abs().max() < 1e-9  # history stays put

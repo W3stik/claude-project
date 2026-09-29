@@ -82,6 +82,29 @@ def test_crypto_bracket_rejected():
     broker = AlpacaBroker("k", "s", client=FakeAlpaca().client())
     with pytest.raises(BrokerError):
         broker.submit_order(OrderRequest("BTC/USD", Side.BUY, 0.01, stop_loss=50_000))
+    # callers (bot, manual orders) ask per symbol and keep crypto stops client-side
+    assert broker.supports_bracket_for("AAPL") and broker.supports_short_for("AAPL")
+    assert not broker.supports_bracket_for("BTC/USD") and not broker.supports_short_for("ETH-USD")
+
+
+def test_manual_crypto_order_goes_without_legs(tmp_path):
+    from daytrader.data.synthetic import SyntheticProvider
+    from daytrader.risk import RiskManager
+    from daytrader.trading import execute_plan, plan_order
+
+    from .conftest import FRIDAY_AFTER_CLOSE, Clock
+
+    fake = FakeAlpaca()
+    fake.route("GET", "/v2/account", {"equity": "10000", "cash": "10000", "buying_power": "10000"})
+    fake.route("GET", "/v2/positions", [])
+    fake.route("POST", "/v2/orders", lambda req: {**ORDER, **json.loads(req.content)})
+    broker = AlpacaBroker("k", "s", client=fake.client())
+    plan = plan_order(broker, SyntheticProvider(now=Clock(FRIDAY_AFTER_CLOSE)), RiskManager(), "BTC/USD", Side.BUY)
+    assert plan.stop is not None and any("nepodporuje bracket" in note for note in plan.notes)
+    execute_plan(broker, plan)
+    body = json.loads(fake.requests[-1].content)
+    assert body["symbol"] == "BTC/USD" and body["time_in_force"] == "gtc"
+    assert "order_class" not in body and "stop_loss" not in body
 
 
 def test_error_message_contains_hint():

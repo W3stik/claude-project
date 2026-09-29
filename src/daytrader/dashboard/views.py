@@ -593,7 +593,8 @@ def bot_page() -> None:
 
     live()
     st.info(
-        "**Tipy:** Americký trh je otevřený po–pá 15:30–22:00 našeho času, mimo tuto dobu bot čeká. "
+        "**Tipy:** Americký trh je otevřený po–pá 15:30–22:00 našeho času, pražská burza 9:00–16:20, "
+        "mimo tuto dobu bot čeká. "
         "Chceš-li bota vyzkoušet hned, přidej krypto (např. BTC-USD), které se obchoduje nonstop. "
         "Bot běží jen dokud běží dashboard. Pro samostatný běh použij `bot.bat` "
         "(nastavení v souboru `.env`, řádky `DT_BOT_...`).",
@@ -617,7 +618,8 @@ def _bot_form(runner, broker, cfg, blocked: bool) -> None:
     c1, c2 = st.columns([3, 1])
     symbols_text = c1.text_input(
         "Symboly", value=", ".join(cfg.bot_symbol_list),
-        help="Americké akcie (AAPL), pražská burza (CEZ.PR), krypto (BTC-USD) – krypto se obchoduje nonstop.",
+        help="Americké akcie (AAPL), Praha (CEZ.PR), Xetra (SAP.DE), Londýn (VOD.L), krypto (BTC-USD) – "
+        "krypto se obchoduje nonstop.",
     )
     interval = c2.selectbox("Interval", BOT_INTERVALS,
                             index=BOT_INTERVALS.index(cfg.bot_interval) if cfg.bot_interval in BOT_INTERVALS else 1)
