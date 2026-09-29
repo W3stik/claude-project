@@ -40,19 +40,58 @@ deník obchodů a volitelný AI komentář**. Ovládá se z webového dashboardu
 
 ## Instalace
 
-Potřebuješ **Python 3.10 nebo novější** ([python.org](https://www.python.org/downloads/)) a git.
+Potřebuješ **Python 3.10–3.14** v 64bitové verzi ([python.org](https://www.python.org/downloads/)).
+Na Windows při instalaci Pythonu zaškrtni **„Add python.exe to PATH“**.
+
+### Windows – nejjednodušší cesta (bez příkazové řádky)
+
+1. Na [stránce repozitáře](https://github.com/W3stik/claude-project) klikni na **Code → Download ZIP**
+   a ZIP rozbal (nebo použij `git clone https://github.com/W3stik/claude-project.git`).
+2. V rozbalené složce dvakrát klikni na **`install.bat`**. Vytvoří virtuální prostředí `.venv`
+   a nainstaluje knihovny (několik minut).
+3. Aplikaci pak spouštíš dvojklikem na **`start.bat`**. Dashboard se otevře v prohlížeči
+   na http://localhost:8501. Černé okno nech otevřené, jinak se aplikace vypne.
+
+### Windows – ručně v PowerShellu
+
+Zadávej příkazy **po jednom**. Windows PowerShell nezná `&&` a místo `source` se prostředí aktivuje přes `Activate.ps1`.
+
+```powershell
+cd claude-project
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e ".[all]"
+copy .env.example .env
+daytrader dashboard
+```
+
+### macOS / Linux
 
 ```bash
 git clone https://github.com/W3stik/claude-project.git
 cd claude-project
-python -m venv .venv
-# Windows:        .venv\Scripts\activate
-# macOS / Linux:  source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[all]"
-cp .env.example .env        # Windows: copy .env.example .env
+cp .env.example .env
+daytrader dashboard
 ```
 
 `.[all]` nainstaluje i podporu kryptoburz (CCXT) a AI komentáře. Bez nich stačí `pip install -e .`.
+
+### Když instalace selže
+
+| Hláška | Řešení |
+|---|---|
+| `The token '&&' is not a valid statement separator` | Windows PowerShell nezná `&&`. Zadávej příkazy po jednom, nebo použij `install.bat`. |
+| `'python' is not recognized…` nebo se otevře Microsoft Store | Místo `python` použij `py`, nebo přeinstaluj Python se zaškrtnutým „Add python.exe to PATH“. |
+| `…Activate.ps1 cannot be loaded because running scripts is disabled…` | Jednou spusť `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, nebo použij `install.bat` a `start.bat`. |
+| `neither 'setup.py' nor 'pyproject.toml' found` | Nejsi ve složce aplikace. Nejdřív `cd` do složky, kde je `pyproject.toml`. |
+| `Microsoft Visual C++ 14.0 or greater is required` / `Failed building wheel` | Pro tvůj Python chybí hotový balíček. Nejčastěji jde o 32bitový Python nebo Windows na ARM, nainstaluj 64bitový (x64) Python. Případně zkus základní verzi `pip install -e .`. |
+| `'daytrader' is not recognized…` | Není aktivované prostředí `.venv`. Aktivuj ho, nebo spusť `python -m daytrader dashboard`. |
+
+Pokud nic z toho nesedí, pošli celý výpis chyby.
 
 ## Rychlý start
 

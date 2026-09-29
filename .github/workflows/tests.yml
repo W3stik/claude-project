@@ -6,11 +6,15 @@ on:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.12", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.14"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,3 +25,26 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Test
         run: pytest
+
+  windows-install-bat:
+    # Same path a Windows user takes: double-click install.bat, then start.bat.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: install.bat
+        shell: cmd
+        env:
+          DAYTRADER_PYTHON: python
+        run: install.bat
+      - name: python -m daytrader
+        shell: cmd
+        run: .venv\Scripts\python.exe -m daytrader strategies
+      - name: Install pytest
+        shell: cmd
+        run: .venv\Scripts\python.exe -m pip install pytest
+      - name: Test
+        shell: cmd
+        run: .venv\Scripts\python.exe -m pytest
