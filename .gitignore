@@ -15,8 +15,8 @@ venv/
 .env
 *.db
 *.sqlite
-data/
-exports/
+/data/
+/exports/
 
 # Editors / OS
 .idea/
