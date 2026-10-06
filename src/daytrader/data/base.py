@@ -17,6 +17,10 @@ class DataError(RuntimeError):
     """Market data could not be retrieved or was empty."""
 
 
+class DataRateLimited(DataError):
+    """The data source refuses requests for a while (too many of them)."""
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -90,6 +94,8 @@ class DataProvider(ABC):
 
     name: str = "base"
     supports_news: bool = False
+    #: How many symbols may be downloaded at the same time (the bot fetches in parallel).
+    parallel_requests: int = 1
 
     @abstractmethod
     def get_bars(

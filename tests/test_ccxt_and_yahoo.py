@@ -168,3 +168,31 @@ def test_yahoo_shares_one_download_within_a_bot_cycle():
     clock["t"] += 21  # the next bot cycle downloads fresh data
     provider.get_latest_price("AAPL")
     assert len(ticker.calls) == 3 and ticker.calls[-1]["period"] == "1d"
+
+
+def test_yahoo_pauses_after_too_many_requests():
+    from daytrader.data.base import DataRateLimited
+
+    calls = []
+
+    class Limited:
+        def history(self, **kwargs):
+            calls.append(kwargs)
+            raise RuntimeError("Too Many Requests. Rate limited. Try after a while.")
+
+    clock = {"t": 0.0}
+    provider = YahooProvider(ticker_factory=lambda symbol: Limited(), clock=lambda: clock["t"])
+    with pytest.raises(DataRateLimited):
+        provider.get_bars("AAPL", "1m", "1d")
+    for ask in (lambda: provider.get_bars("MSFT", "1m", "1d"), lambda: provider.get_latest_price("MSFT")):
+        with pytest.raises(DataRateLimited):
+            ask()  # paused: Yahoo is not asked at all
+    assert len(calls) == 1
+    clock["t"] += 61
+    with pytest.raises(DataRateLimited):
+        provider.get_bars("MSFT", "1m", "1d")  # asked again after a minute, refused again …
+    assert len(calls) == 2
+    clock["t"] += 61
+    with pytest.raises(DataRateLimited):
+        provider.get_bars("MSFT", "1m", "1d")  # … so now it waits two minutes
+    assert len(calls) == 2

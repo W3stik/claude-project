@@ -332,3 +332,83 @@ def test_minute_bot_scalps_with_short_holds(tmp_path):
     assert len(trips) >= 5
     minutes = (pd.to_datetime(trips["exit_time"]) - pd.to_datetime(trips["entry_time"])).dt.total_seconds() / 60
     assert minutes.max() <= 11  # max_hold = 10 bars
+
+
+class CountingSynthetic(SyntheticProvider):
+    def __init__(self, now, parallel=1, broken=()):
+        super().__init__(now=now)
+        self.parallel_requests = parallel
+        self.requests = []
+        self.broken = set(broken)
+
+    def get_bars(self, symbol, interval="5m", period="5d", start=None, end=None):
+        if symbol in self.broken:
+            from daytrader.data.base import DataError
+
+            raise DataError(f"{symbol}: nic")
+        if interval == "1m" and end is None:
+            self.requests.append((symbol, "full" if start is None else "new"))
+        return super().get_bars(symbol, interval, period, start, end)
+
+    def get_latest_price(self, symbol):  # not one of the bot's bar downloads
+        return float(SyntheticProvider.get_bars(self, symbol, "1m", "7d")["close"].iloc[-1])
+
+
+def minute_bot(tmp_path, provider, clock, symbols):
+    broker = PaperBroker(tmp_path / "paper.db", provider, clock=clock, allow_short=True)
+    risk = RiskManager(RiskConfig(allow_short=True, max_trades_per_day=1000).with_max_positions(5))
+    return TradingBot(broker, provider, get_strategy("scalp", rsi=2, dip=45, take=55, max_hold=3), risk,
+                      Journal(tmp_path / "journal.db"), BotConfig(symbols=symbols, interval="1m"), clock=clock)
+
+
+def test_minute_bot_downloads_in_parallel_and_only_new_bars(tmp_path):
+    symbols = ["AAPL", "MSFT", "NVDA", "BTC-USD", "SPY", "QQQ"]
+    runs = []
+    for parallel in (1, 4):
+        clock = Clock(datetime(2026, 9, 21, 13, 30, 3, tzinfo=timezone.utc))
+        provider = CountingSynthetic(clock, parallel=parallel)
+        bot = minute_bot(tmp_path / f"p{parallel}", provider, clock, symbols)
+        decisions = []
+        for _ in range(90):
+            decisions += [(d.symbol, d.action, d.message) for d in bot.run_once()]
+            clock.now += timedelta(minutes=1)
+        runs.append(decisions)
+        kinds = [kind for _, kind in provider.requests]
+        assert kinds.count("full") == len(symbols)  # the history is downloaded once …
+        assert kinds.count("new") >= 80 * len(symbols)  # … then only the newest bars, every minute
+    assert runs[0] == runs[1]  # parallel downloads change nothing about the decisions
+    assert any(action.startswith("enter") for _, action, _ in runs[0])
+
+
+def test_symbol_with_failing_data_is_left_out_for_a_while(tmp_path):
+    clock = Clock(datetime(2026, 9, 21, 13, 30, 3, tzinfo=timezone.utc))
+    provider = CountingSynthetic(clock, broken={"NOPE"})
+    bot = minute_bot(tmp_path, provider, clock, ["AAPL", "NOPE"])
+    messages = []
+    for _ in range(5):
+        decision = next(d for d in bot.run_once() if d.symbol == "NOPE")
+        messages.append((decision.action, decision.message))
+        clock.now += timedelta(minutes=1)
+    assert [a for a, _ in messages] == ["error", "error", "error", "skip", "skip"]
+    assert "vynechám" in messages[2][1] and "vynechán" in messages[3][1]
+    clock.now += timedelta(minutes=30)  # tried again later
+    assert next(d for d in bot.run_once() if d.symbol == "NOPE").action == "error"
+
+
+def test_rate_limited_source_pauses_quietly(tmp_path):
+    from daytrader.data.base import DataRateLimited
+
+    clock = Clock(datetime(2026, 9, 21, 13, 30, 3, tzinfo=timezone.utc))
+
+    class Limited(SyntheticProvider):
+        def get_bars(self, symbol, interval="5m", period="5d", start=None, end=None):
+            raise DataRateLimited("Yahoo dočasně omezilo počet dotazů.")
+
+    provider = Limited(now=clock)
+    bot = minute_bot(tmp_path, provider, clock, ["AAPL", "MSFT"])
+    journal = bot.journal
+    for _ in range(3):
+        assert {d.action for d in bot.run_once()} == {"skip"}  # not one error per symbol and minute
+        clock.now += timedelta(minutes=1)
+    warnings = [m for m in journal.events(50)["message"] if "omezil" in m]
+    assert len(warnings) == 1

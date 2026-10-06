@@ -8,7 +8,7 @@ for the day after a maximum daily loss, and avoid over-trading.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .config import Settings
 from .models import Account, Position, Side
@@ -38,6 +38,11 @@ class RiskConfig:
             take_profit_r=settings.take_profit_r,
             allow_short=settings.allow_short,
         )
+
+    def with_max_positions(self, max_positions: int) -> "RiskConfig":
+        """Allow ``max_positions`` open positions, each capped so that all of them fit into the capital."""
+        return replace(self, max_open_positions=max_positions,
+                       max_position_pct=min(self.max_position_pct, 100 / max_positions))
 
 
 @dataclass

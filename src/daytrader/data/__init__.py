@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..config import ConfigError, Settings, get_settings
-from .base import DataError, DataProvider, drop_incomplete_bar, normalize_bars
+from .base import DataError, DataProvider, DataRateLimited, drop_incomplete_bar, normalize_bars
 from .synthetic import SyntheticProvider
 from .yahoo import YahooProvider
 
@@ -41,6 +41,7 @@ def create_provider(name: str | None = None, settings: Settings | None = None) -
 __all__ = [
     "PROVIDERS",
     "DataError",
+    "DataRateLimited",
     "DataProvider",
     "SyntheticProvider",
     "YahooProvider",

@@ -23,11 +23,11 @@ from .ai import AIAnalyst, AIError
 from .analysis.snapshot import build_snapshot
 from .backtest import EXIT_REASONS, BacktestConfig, grid_search, run_backtest
 from .backtest.metrics import METRIC_LABELS, format_metric
-from .bot import BotAlreadyRunning, BotConfig, TradingBot, next_market_open
+from .bot import BotAlreadyRunning, BotConfig, TradingBot, next_market_open, symbols_label
 from .brokers import BrokerError, create_broker
 from .brokers.base import Broker
 from .brokers.paper import PaperBroker
-from .config import ConfigError, get_settings, parse_symbols
+from .config import ConfigError, Settings, get_settings, parse_symbols
 from .data import DataError, DataProvider, create_provider
 from .journal import Journal, journal_stats, round_trips
 from .models import Side
@@ -134,15 +134,21 @@ def journal_for() -> Journal:
     return Journal(get_settings().ensure_data_dir() / "journal.db")
 
 
-def risk_manager(max_trades: int | None = None) -> RiskManager:
-    config = RiskConfig.from_settings(get_settings())
+def risk_manager(
+    max_trades: int | None = None, max_positions: int | None = None, settings: Settings | None = None
+) -> RiskManager:
+    config = RiskConfig.from_settings(settings or get_settings())
     if max_trades is not None:
         config.max_trades_per_day = max_trades
+    if max_positions is not None:
+        config = config.with_max_positions(max_positions)
     return RiskManager(config)
 
 
-def make_broker(broker: str | None, provider: str | None) -> tuple[Broker, DataProvider]:
-    settings = get_settings()
+def make_broker(
+    broker: str | None, provider: str | None, settings: Settings | None = None
+) -> tuple[Broker, DataProvider]:
+    settings = settings or get_settings()
     data = create_provider(provider, settings)
     return create_broker(broker, settings, provider=data), data
 
@@ -561,15 +567,23 @@ def bot(
     interval: Annotated[str | None, typer.Option("--interval", "-i", help="Interval svíček [DT_BOT_INTERVAL]")] = None,
     lookback: Annotated[str, typer.Option(help="Kolik historie načítat pro signály")] = "5d",
     max_trades: Annotated[int | None, typer.Option("--max-trades", min=1, help="Max. obchodů za den [DT_MAX_TRADES_PER_DAY]")] = None,
+    max_positions: Annotated[int | None, typer.Option(
+        "--max-positions", min=1, help="Max. pozic najednou; každá se zmenší, aby se všechny vešly do kapitálu "
+        "[DT_MAX_OPEN_POSITIONS]")] = None,
+    short: Annotated[bool | None, typer.Option("--short/--no-short", help="Povolit sázky na pokles [DT_ALLOW_SHORT]")] = None,
     broker: BrokerOpt = None,
     provider: ProviderOpt = None,
     once: Annotated[bool, typer.Option("--once", help="Jen jedno vyhodnocení a konec")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Jen vypisovat rozhodnutí, nic neposílat")] = False,
     yes: YesOpt = False,
 ) -> None:
-    """Automatický obchodní bot (Ctrl+C = zastavení). Výchozí nastavení bere z .env (DT_BOT_*)."""
+    """Automatický obchodní bot (Ctrl+C = zastavení). Výchozí nastavení bere z .env (DT_BOT_*).
+
+    Symboly mohou být i celé skupiny: @us, @etf, @krypto, @binance, @praha, @dax, @londyn."""
     settings = get_settings()
-    brk, data = make_broker(broker, provider)
+    if short is not None:
+        settings = settings.model_copy(update={"allow_short": short})
+    brk, data = make_broker(broker, provider, settings)
     strategy_key = strategy or settings.bot_strategy
     if param:
         params: dict[str, Any] = parse_params(param)
@@ -581,8 +595,8 @@ def bot(
     watch = parse_symbols(symbols) if symbols else settings.bot_symbol_list
     interval = interval or settings.bot_interval
     if not dry_run:
-        confirm_live(brk, yes, f"spuštění bota {strat.label()} na {', '.join(watch)}")
-    risk = risk_manager(max_trades)
+        confirm_live(brk, yes, f"spuštění bota {strat.label()} na {symbols_label(watch)}")
+    risk = risk_manager(max_trades, max_positions, settings)
     trading_bot = TradingBot(brk, data, strat, risk, journal_for(),
                              BotConfig(symbols=watch, interval=interval, lookback=lookback, dry_run=dry_run))
     last_notice = {"at": float("-inf")}
@@ -617,9 +631,10 @@ def bot(
         mode = "papírový účet – falešné peníze"
     console.print(Panel(
         f"Strategie: {strat.label()}\n"
-        f"Symboly: {', '.join(watch)} · interval {interval}\n"
+        f"Symboly: {symbols_label(watch)} · interval {interval}\n"
         f"Broker: {brk.name} ({mode}) · kapitál {fmt(account.equity)} {account.currency}\n"
-        f"Max. obchodů za den: {risk.config.max_trades_per_day} · max. otevřených pozic: {risk.config.max_open_positions}\n"
+        f"Max. obchodů za den: {risk.config.max_trades_per_day} · max. pozic najednou: {risk.config.max_open_positions} "
+        f"(každá do {risk.config.max_position_pct:.0f} % kapitálu) · short: {'ano' if risk.config.allow_short else 'ne'}\n"
         "Bot vyhodnotí každou uzavřenou svíčku; mimo obchodní hodiny čeká. Zastavíš ho klávesami Ctrl+C.",
         title="Obchodní bot", border_style="red" if brk.is_live and not dry_run else "blue",
     ))

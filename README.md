@@ -20,7 +20,7 @@ deník obchodů a volitelný AI komentář**. Ovládá se z webového dashboardu
 | **Backtest** | 7 strategií (křížení EMA, VWAP trend, průraz ranního rozpětí ORB, RSI, Bollinger, MACD a minutové skalpování). Počítá s poplatky a skluzem, stop-lossem a take-profitem z ATR a zavíráním pozic na konci dne. Optimalizace parametrů s ověřením na odložených datech. |
 | **Obchodování** | Papírový účet (lokální simulace), Alpaca (paper i live), kryptoburzy přes CCXT (Binance, Kraken, Coinbase, Bybit, Coinmate…). Před odesláním příkazu ukáže plán: velikost pozice dopočítanou z rizika, stop-loss, take-profit a poměr zisku k riziku. |
 | **Řízení rizik** | Riziko ~1 % kapitálu na obchod, denní limit ztráty, maximum otevřených pozic, maximum obchodů za den, povinný stop-loss, upozornění na pravidlo PDT. |
-| **Bot** | Automaticky obchoduje zvolenou strategii podle stejných pravidel jako backtest, klidně i každou minutu (skalpování). Umí „suchý běh“ bez odesílání příkazů. |
+| **Bot** | Automaticky obchoduje zvolenou strategii podle stejných pravidel jako backtest, klidně i každou minutu (skalpování) a na desítkách akcií, ETF a kryptoměn najednou. Umí „suchý běh“ bez odesílání příkazů. |
 | **Deník** | Uzavřené obchody, úspěšnost, profit factor, P/L po dnech a export do CSV. |
 | **AI komentář** | Volitelné shrnutí technické situace od Clauda (Claude API, placené podle spotřeby). |
 
@@ -53,7 +53,8 @@ Na Windows při instalaci Pythonu zaškrtni **„Add python.exe to PATH“**.
    na http://localhost:8501. Černé okno nech otevřené, jinak se aplikace vypne.
 4. Automatické obchodování na papírovém účtu spustíš dvojklikem na **`bot.bat`**
    (viz [Automatické obchodování](#automatické-obchodování-bot)). Bota, který obchoduje každou minutu,
-   spustí **`bot-1min.bat`** (viz [Minutové obchodování](#minutové-obchodování-skalpování)).
+   spustí **`bot-1min.bat`** (viz [Minutové obchodování](#minutové-obchodování-skalpování)), co nejčastější
+   obchodování na desítkách trhů **`bot-max.bat`** a **`bot-krypto.bat`** (viz [Co nejčastěji](#co-nejčastější-obchodování-na-desítkách-trhů)).
 
 ### Windows – ručně v PowerShellu
 
@@ -221,10 +222,11 @@ Bot obchoduje sám. Výchozí je **papírový účet**, tedy falešné peníze b
    ```ini
    DT_BOT_STRATEGY=vwap_trend        # vwap_trend | orb | ema_cross | rsi_reversion | bollinger | macd | scalp
    DT_BOT_INTERVAL=5m
-   DT_BOT_SYMBOLS=AAPL,MSFT,NVDA,AMD,TSLA
+   DT_BOT_SYMBOLS=AAPL,MSFT,NVDA,AMD,TSLA   # nebo celé skupiny, např. @us,@etf
    DT_BOT_PARAMS=                    # např. fast=9,slow=21
    ```
-2. **Dashboard → stránka *Bot*.** Vybereš symboly, strategii a parametry a klikneš na *Spustit bota*.
+2. **Dashboard → stránka *Bot*.** Vybereš symboly (i skupiny jako `@us`), strategii, parametry, počet pozic
+   najednou a jestli smí sázet na pokles (short), a klikneš na *Spustit bota*.
    Uvidíš stav, otevřené pozice a rozhodnutí. Bot běží, dokud běží dashboard.
 3. **Příkazová řádka:** `daytrader bot` (bere nastavení z `.env`), případně
    `daytrader bot -s orb --symbols AAPL,MSFT -i 5m`. Volba `--dry-run` jen vypisuje rozhodnutí a nic neobchoduje.
@@ -289,8 +291,67 @@ jejich popis vypíše `daytrader strategies`.
 - Kryptoburzy si berou poplatek zhruba 0,1–0,6 % z každého obchodu, což minutové obchody na skutečném účtu
   většinou prodělá. Americké pravidlo PDT (minimálně 25 000 USD na účtu pro častý day trading) regulátor
   od 4. 6. 2026 zrušil, brokeři ho ale můžou rušit postupně až do října 2027. Ověř si, jak to má tvůj broker.
-- Bot stahuje data každou minutu. Dotazy na Yahoo proto slučuje (jedno stažení na symbol za kolo),
-  ale s desítkami symbolů může Yahoo začít požadavky dočasně odmítat.
+- Bot stahuje data každou minutu: jeden dotaz na symbol a po prvním stažení jen nejnovější svíčky.
+  Když Yahoo dotazy dočasně odmítne, bot chvíli počká (víc v další kapitole).
+
+### Co nejčastější obchodování na desítkách trhů
+
+**Jak často může bot obchodovat:**
+- Nejkratší svíčka je 1 minuta (jemnější data Yahoo nemá), takže se bot u každého symbolu rozhoduje nejvýš jednou za minutu.
+- Jeden symbol zvládne nejvýš zhruba jeden obchod za 2 minuty: nákup, prodej a další obchod až na nový signál.
+- Kolik obchodů bot udělá celkem, určuje hlavně počet symbolů. Strop pak dávají počet pozic najednou
+  (`--max-positions`, `DT_MAX_OPEN_POSITIONS`), limit obchodů za den (`--max-trades`, `DT_MAX_TRADES_PER_DAY`),
+  denní limit ztráty 3 % (`DT_MAX_DAILY_LOSS_PCT`, po jeho dosažení bot ten den nové obchody neotevírá)
+  a otevírací doba trhů (akcie z USA 15:30–22:00, krypto nonstop).
+
+**Skupiny symbolů.** Místo vypisování tickerů napiš skupinu, např. `DT_BOT_SYMBOLS=@us,@etf` nebo `--symbols @krypto`.
+Skupiny jdou kombinovat i s jednotlivými symboly (`@us,CEZ.PR`) a fungují i ve watchlistu, scanneru a dashboardu.
+
+| Skupina | Co obsahuje | Kdy obchoduje |
+|---|---|---|
+| `@us` | 40 nejobchodovanějších amerických akcií | po–pá 15:30–22:00 |
+| `@etf` | 14 likvidních ETF (indexy, sektory, zlato, dluhopisy, 3× páka) | po–pá 15:30–22:00 |
+| `@krypto` | 15 největších kryptoměn v USD (Yahoo) | nonstop |
+| `@binance` | 30 kryptoměn v USDT přímo z burzy Binance (zdroj dat `ccxt`) | nonstop |
+| `@praha` | 8 akcií z pražské burzy | po–pá 9:00–16:20, data o 20 min zpožděná |
+| `@dax` | 15 německých akcií z indexu DAX | po–pá 9:00–17:30, zpožděná data |
+| `@londyn` | 10 britských akcií | po–pá 9:00–17:30, zpožděná data |
+
+Evropské skupiny se hodí pro pomalejšího bota (`bot.bat`, 5minutové svíčky), na minutové obchodování ne.
+
+**Spuštění na maximum:**
+- **`bot-max.bat`**: 54 amerických akcií a ETF (`@us,@etf`), nejrychlejší parametry skalpování (RSI 2, vstup nad 45,
+  výstup na 55, pozici drží nejdéle 3 minuty), až 10 pozic najednou (každá do 10 % kapitálu), i sázky na pokles.
+- **`bot-krypto.bat`**: totéž pro 30 kryptoměn z Binance (`@binance`), obchoduje nonstop i o víkendu.
+  Ceny bere přímo z burzy (veřejná data, bez registrace).
+- Oba můžou běžet zároveň, každý má vlastní papírový účet. V dashboardu mezi nimi přepínáš volbou *Zdroj dat*
+  (Yahoo / Kryptoburza přes CCXT).
+- V dashboardu napíšeš skupiny do pole *Symboly*, nastavíš *Max. pozic najednou* a zaškrtneš *Povolit short*.
+  Víc pozic najednou automaticky zmenší každou z nich, aby se všechny vešly do kapitálu.
+
+**Kolik obchodů a za kolik.** Simulace na demo datech, papírový účet 10 000 USD a skluz 0,02 % na každý nákup i prodej:
+
+| Nastavení | Obchodů za hodinu | Pozice držena | Výsledek |
+|---|---|---|---|
+| `bot-1min.bat` (5 akcií, výchozí skalpování) | ~6 | 4,5 min | −0,04 % za den |
+| 10 akcií, rychlejší parametry, 5 pozic | ~27 | 2,2 min | −1 % za den |
+| 10 akcií, nejrychlejší parametry, i sázky na pokles | ~62 | 1,6 min | −3 % za den |
+| `bot-max.bat` (54 akcií a ETF) | ~280 | 1,5 min | −3 % za 3 hodiny, pak ho zastaví denní limit ztráty |
+| `bot-krypto.bat` (30 kryptoměn) | ~160 | 1,6 min | −3 % za 4 hodiny, pak ho zastaví denní limit ztráty |
+
+Ceny v demo datech jsou náhodné, takže na nich žádná strategie vydělat nemůže a výsledek ukazuje čistě náklady.
+Každý obchod stojí spread a skluz: čím víc obchodů, tím větší ztráta, pokud strategie nemá skutečnou výhodu.
+Jestli ji má, ukáže až backtest na skutečných datech a papírový účet.
+
+**Data a limity:**
+- Bot stahuje data pro desítky symbolů souběžně, jeden dotaz na symbol a minutu, po prvním stažení jen nejnovější svíčky.
+  S `bot-max.bat` je to 54 dotazů za minutu na Yahoo.
+- Yahoo limity nezveřejňuje. Když dotazy dočasně odmítne, bot napíše „Zdroj dat dočasně omezil počet dotazů“ a počká
+  (minutu, při opakování déle). Když se to stává často, zmenši počet symbolů, nebo jako zdroj dat použij Alpacu
+  (zdarma po registraci, 200 dotazů za minutu).
+- Symbol, u kterého data opakovaně selhávají (třeba zrušený ticker), bot na 30 minut vynechá.
+- Drahé akcie se do malé pozice nemusí vejít: s 10 000 USD a 10 pozicemi připadá na jednu asi 1 000 USD,
+  akcii za víc bot nekoupí (napíše „Vypočtené množství je 0“).
 
 ## Přechod na živé obchodování
 
@@ -320,6 +381,7 @@ src/daytrader/
 ├── bot.py         automatický obchodní bot
 ├── journal.py     deník a statistiky obchodů
 ├── scanner.py     scanner watchlistu
+├── universe.py    skupiny symbolů (@us, @etf, @krypto, @binance, …)
 ├── ai.py          AI komentář (Claude API)
 └── cli.py         příkazová řádka
 ```

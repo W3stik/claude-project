@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -20,7 +21,7 @@ import pandas as pd
 
 from .analysis.indicators import atr
 from .brokers.base import Broker, BrokerError
-from .data.base import DataError, DataProvider, drop_incomplete_bar, to_utc, utcnow
+from .data.base import DataError, DataProvider, DataRateLimited, drop_incomplete_bar, to_utc, utcnow
 from .journal import Journal
 from .models import OrderRequest, OrderType, Position, Side
 from .risk import RiskManager
@@ -31,6 +32,14 @@ from .timeframes import interval_seconds, interval_timedelta
 # A feed that trails the clock by more than this is treated as delayed (Yahoo publishes
 # Prague and other European exchanges 15-20 minutes late).
 FEED_LAG_TOLERANCE = pd.Timedelta(minutes=1)
+# After the first full download only the newest bars are fetched; the last few are fetched
+# again because the newest one may still have been forming. Now and then everything is
+# downloaded again (splits, corrected data).
+OVERLAP_BARS = 3
+FULL_REFRESH = pd.Timedelta(hours=2)
+# A symbol whose data keeps failing is left out for a while instead of erroring every minute.
+MAX_DATA_ERRORS = 3
+PARK_FOR = pd.Timedelta(minutes=30)
 
 
 class BotAlreadyRunning(RuntimeError):
@@ -39,6 +48,11 @@ class BotAlreadyRunning(RuntimeError):
 
 def symbol_key(symbol: str) -> str:
     return symbol.upper().replace("/", "").replace("-", "")
+
+
+def symbols_label(symbols: list[str], limit: int = 8) -> str:
+    shown = ", ".join(symbols[:limit])
+    return shown if len(symbols) <= limit else f"{shown} … (celkem {len(symbols)})"
 
 
 def next_market_open(symbols: list[str], now: datetime) -> datetime | None:
@@ -96,12 +110,18 @@ class TradingBot:
         self._entered_on_bar: dict[str, pd.Timestamp] = {}
         self._next_eval: dict[str, pd.Timestamp] = {}
         self._evaluated_bar: dict[str, pd.Timestamp] = {}
+        self._history: dict[str, pd.DataFrame] = {}
+        self._downloaded_at: dict[str, pd.Timestamp] = {}
+        self._errors: dict[str, int] = {}
+        self._parked_until: dict[str, pd.Timestamp] = {}
         self._loss_logged_on: datetime | None = None
+        self._rate_limit_logged = False
         self.last_run: datetime | None = None
 
     # -- main loop -------------------------------------------------------------------
     def run_once(self) -> list[Decision]:
         now = self.clock()
+        prefetched = self._prefetch(now)  # before the broker sync, which can then reuse the download
         try:
             self.broker.sync()
         except BrokerError as exc:
@@ -115,12 +135,22 @@ class TradingBot:
             self.journal.log("Denní limit ztráty dosažen – bot dnes neotevírá nové obchody.", "warning", "bot", ts=now)
 
         decisions = []
+        rate_limited = False
         for symbol in self.config.symbols:
             by_key = {symbol_key(p.symbol): p for p in positions}
             try:
-                decision = self._handle(symbol, now, account, positions, by_key.get(symbol_key(symbol)), trades_today)
+                decision = self._handle(
+                    symbol, now, account, positions, by_key.get(symbol_key(symbol)), trades_today, prefetched
+                )
+            except DataRateLimited as exc:
+                rate_limited = True
+                decision = Decision(symbol, "skip", str(exc))
             except (DataError, BrokerError, ValueError) as exc:
                 decision = Decision(symbol, "error", f"Chyba: {exc}")
+                if isinstance(exc, DataError):
+                    decision = self._count_data_error(symbol, now, decision)
+            else:
+                self._errors.pop(symbol, None)
             if decision.action.startswith("enter"):
                 trades_today += 1
             if decision.action.startswith("enter") or decision.action in ("exit", "flatten"):
@@ -135,8 +165,71 @@ class TradingBot:
                 level = {"error": "error", "blocked": "warning"}.get(decision.action, "info")
                 self.journal.log(decision.message, level, "bot", symbol, ts=now)
             decisions.append(decision)
+        if rate_limited and not self._rate_limit_logged:
+            self.journal.log("Zdroj dat dočasně omezil počet dotazů – bot chvíli počká.", "warning", "bot", ts=now)
+        self._rate_limit_logged = rate_limited
         self.last_run = now
         return decisions
+
+    # -- market data -----------------------------------------------------------------------
+    def _needs_bars(self, symbol: str, now: datetime) -> bool:
+        parked = self._parked_until.get(symbol)
+        if parked is not None and to_utc(now) < parked:
+            return False
+        if not session_for_symbol(symbol).is_open(now):
+            return False
+        due = self._next_eval.get(symbol)
+        return due is None or to_utc(now) >= due
+
+    def _prefetch(self, now: datetime) -> dict[str, pd.DataFrame | Exception]:
+        """Download bars for every symbol that needs them this cycle, several at once if the source allows."""
+        due = [symbol for symbol in self.config.symbols if self._needs_bars(symbol, now)]
+
+        def fetch(symbol: str) -> tuple[str, pd.DataFrame | Exception]:
+            try:
+                return symbol, self._fetch_bars(symbol, now)
+            except Exception as exc:  # raised again when the symbol is handled
+                return symbol, exc
+
+        workers = min(len(due), max(1, getattr(self.provider, "parallel_requests", 1)))
+        if workers <= 1:
+            return dict(map(fetch, due))
+        with ThreadPoolExecutor(workers, thread_name_prefix="bot-data") as pool:
+            return dict(pool.map(fetch, due))
+
+    def _fetch_bars(self, symbol: str, now: datetime) -> pd.DataFrame:
+        """The lookback window of bars; after the first download only the newest bars are fetched."""
+        cfg = self.config
+        now_ts = to_utc(now)
+        cached = self._history.get(symbol)
+        downloaded = self._downloaded_at.get(symbol)
+        if cached is None or cached.empty or downloaded is None or now_ts - downloaded > FULL_REFRESH:
+            bars = self.provider.get_bars(symbol, cfg.interval, cfg.lookback)
+            self._downloaded_at[symbol] = now_ts
+        else:
+            start = cached.index[-1] - OVERLAP_BARS * interval_timedelta(cfg.interval)
+            fresh = self.provider.get_bars(symbol, cfg.interval, start=start)
+            bars = pd.concat([cached[cached.index < fresh.index[0]], fresh]) if len(fresh) else cached
+        self._history[symbol] = bars
+        return bars
+
+    def _bars(self, symbol: str, now: datetime, prefetched: dict | None) -> pd.DataFrame:
+        if prefetched is not None and symbol in prefetched:
+            result = prefetched[symbol]
+            if isinstance(result, Exception):
+                raise result
+            return result
+        return self._fetch_bars(symbol, now)
+
+    def _count_data_error(self, symbol: str, now: datetime, decision: Decision) -> Decision:
+        errors = self._errors.get(symbol, 0) + 1
+        if errors < MAX_DATA_ERRORS:
+            self._errors[symbol] = errors
+            return decision
+        self._errors.pop(symbol, None)
+        self._parked_until[symbol] = to_utc(now) + PARK_FOR
+        minutes = int(PARK_FOR.total_seconds() // 60)
+        return Decision(symbol, "error", f"{decision.message} – data opakovaně selhávají, symbol na {minutes} minut vynechám.")
 
     def run_forever(
         self,
@@ -148,7 +241,7 @@ class TradingBot:
         poll = self.config.poll_seconds or min(bar_seconds, 60)
         account_key = self.broker.account_key
         instance = uuid.uuid4().hex
-        info = f"{self.strategy.label()} | {', '.join(self.config.symbols)} | {self.config.interval}"
+        info = f"{self.strategy.label()} | {symbols_label(self.config.symbols)} | {self.config.interval}"
         holder = self.journal.acquire_bot_lock(account_key, instance, info, datetime.now(timezone.utc))
         if holder is not None:
             raise BotAlreadyRunning(
@@ -185,6 +278,7 @@ class TradingBot:
         positions: list[Position],
         position: Position | None,
         trades_today: int,
+        prefetched: dict | None = None,
     ) -> Decision:
         cfg = self.config
         session = session_for_symbol(symbol)
@@ -197,13 +291,16 @@ class TradingBot:
             self._close(symbol, position, "eod")
             return Decision(symbol, "flatten", f"Konec seance za {minutes_left:.0f} min – pozice uzavřena.")
 
+        parked = self._parked_until.get(symbol)
+        if parked is not None and to_utc(now) < parked:
+            return Decision(symbol, "skip", "Dočasně vynechán – data opakovaně selhávala.")
         step = interval_timedelta(cfg.interval)
         due = self._next_eval.get(symbol)
         if due is not None and to_utc(now) < due:
             # No new bar yet: skip the data download, only watch client-side stops.
             return self._watch_stops(symbol, side_now, position) or Decision(symbol, "hold", "Čekám na další svíčku.")
 
-        bars = self.provider.get_bars(symbol, cfg.interval, cfg.lookback)
+        bars = self._bars(symbol, now, prefetched)
         # On a delayed feed the newest bar is still forming at the source even though, by the
         # clock, it should have closed already.
         delayed = len(bars) > 0 and to_utc(now) - bars.index[-1].tz_convert("UTC") - step > FEED_LAG_TOLERANCE

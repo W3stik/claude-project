@@ -27,6 +27,7 @@ def _crypto_pair(symbol: str) -> str:
 class AlpacaDataProvider(DataProvider):
     name = "alpaca"
     supports_news = True
+    parallel_requests = 4
 
     def __init__(
         self,

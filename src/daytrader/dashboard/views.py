@@ -12,7 +12,7 @@ from ..analysis.indicators import add_indicators
 from ..analysis.snapshot import build_snapshot
 from ..backtest import EXIT_REASONS, BacktestConfig, grid_search, run_backtest
 from ..backtest.metrics import METRIC_LABELS, format_metric
-from ..bot import BotConfig, TradingBot, next_market_open
+from ..bot import BotConfig, TradingBot, next_market_open, symbols_label
 from ..brokers import create_broker
 from ..brokers.paper import PaperBroker
 from ..config import parse_symbols
@@ -25,6 +25,7 @@ from ..sessions import is_crypto_symbol, session_for_symbol
 from ..strategies import STRATEGIES, get_strategy
 from ..timeframes import INTERVALS, PERIODS
 from ..trading import execute_plan, plan_order
+from ..universe import universe_help
 from . import charts
 from .common import (
     bot_runner,
@@ -600,6 +601,7 @@ def bot_page() -> None:
         "mimo tuto dobu bot čeká. "
         "Chceš-li bota vyzkoušet hned, přidej krypto (např. BTC-USD), které se obchoduje nonstop. "
         "Pro obchodování každou minutu vyber strategii *Skalpování* – interval se přepne na 1 minutu. "
+        "Na desítkách trhů najednou napiš do symbolů skupiny jako `@us,@etf` nebo použij `bot-max.bat` a `bot-krypto.bat`. "
         "Bot běží jen dokud běží dashboard. Pro samostatný běh použij `bot.bat`, minutového bota spustí "
         "`bot-1min.bat` (nastavení v souboru `.env`, řádky `DT_BOT_...`).",
         icon="ℹ️",
@@ -620,9 +622,10 @@ def _bot_status(runner) -> None:
 
 def _bot_form(runner, broker, cfg, blocked: bool) -> None:
     symbols_text = st.text_input(
-        "Symboly", value=", ".join(cfg.bot_symbol_list),
+        "Symboly", value=cfg.bot_symbols or cfg.watchlist,
         help="Americké akcie (AAPL), Praha (CEZ.PR), Xetra (SAP.DE), Londýn (VOD.L), krypto (BTC-USD) – "
-        "krypto se obchoduje nonstop.",
+        f"krypto se obchoduje nonstop. Celé skupiny: {universe_help()}. Skupina @binance potřebuje zdroj dat "
+        "„Kryptoburza přes CCXT“.",
     )
     keys = list(STRATEGIES)
     c1, c2, c3 = st.columns([2, 1, 1])
@@ -636,6 +639,13 @@ def _bot_form(runner, broker, cfg, blocked: bool) -> None:
     max_trades = int(c3.number_input("Max. obchodů za den", min_value=1, max_value=1000, value=default_trades,
                                      step=10, key=f"bot_max_trades_{interval}"))
     st.caption(STRATEGIES[strategy_key].description)
+    c4, c5 = st.columns([1, 3], vertical_alignment="bottom")
+    max_positions = int(c4.number_input("Max. pozic najednou", min_value=1, max_value=50,
+                                        value=cfg.max_open_positions, step=1, key="bot_max_positions"))
+    short = c5.checkbox("Povolit short (sázky na pokles)", value=cfg.allow_short, key="bot_short",
+                        help="Bot pak obchoduje i v klesajícím trendu, takže obchodů je víc. Na papírovém účtu bez rizika.")
+    limits = RiskConfig.from_settings(cfg.model_copy(update={"allow_short": short})).with_max_positions(max_positions)
+    limits.max_trades_per_day = max_trades
     with st.expander("Parametry strategie"):
         params = _strategy_params(strategy_key, "bot")
     mode = st.radio("Režim", list(BOT_MODES), format_func=BOT_MODES.get, horizontal=True,
@@ -645,7 +655,8 @@ def _bot_form(runner, broker, cfg, blocked: bool) -> None:
                  "živé obchodování spouštěj z příkazové řádky, kde se potvrzuje ručně.")
     st.caption(
         f"Broker **{broker_name()}** · zdroj dat **{provider_name()}** · riziko {cfg.risk_per_trade_pct:g} % na obchod · "
-        f"max. {cfg.max_open_positions} pozice · denní limit ztráty {cfg.max_daily_loss_pct:g} %"
+        f"max. {limits.max_open_positions} pozic najednou, každá do {limits.max_position_pct:.0f} % kapitálu · "
+        f"denní limit ztráty {cfg.max_daily_loss_pct:g} %"
     )
     if st.button("Spustit bota", type="primary", disabled=blocked or (broker.is_live and mode == "trade")):
         with guard():
@@ -653,16 +664,17 @@ def _bot_form(runner, broker, cfg, blocked: bool) -> None:
             if not symbols:
                 raise ValueError("Zadej aspoň jeden symbol.")
             dry_run = mode == "watch"
-            provider = create_provider(provider_name(), cfg)
-            bot_broker = create_broker(broker_name(), cfg, provider=provider)
+            bot_cfg = cfg.model_copy(update={"allow_short": short})
+            provider = create_provider(provider_name(), bot_cfg)
+            bot_broker = create_broker(broker_name(), bot_cfg, provider=provider)
             if bot_broker.is_live and not dry_run:
                 raise ValueError("Živého bota spouštěj z příkazové řádky (daytrader bot), kde se potvrzuje ručně.")
             strategy = get_strategy(strategy_key, **params)
-            risk = _risk()
-            risk.config.max_trades_per_day = max_trades
-            bot = TradingBot(bot_broker, provider, strategy, risk, Journal(cfg.ensure_data_dir() / "journal.db"),
+            bot = TradingBot(bot_broker, provider, strategy, RiskManager(limits),
+                             Journal(cfg.ensure_data_dir() / "journal.db"),
                              BotConfig(symbols=symbols, interval=interval, dry_run=dry_run))
-            runner.start(bot, f"{strategy.label()} · {', '.join(symbols)} · {interval}{' · jen sledování' if dry_run else ''}")
+            runner.start(bot, f"{strategy.label()} · {symbols_label(symbols)} · {interval}"
+                              f"{' · jen sledování' if dry_run else ''}")
         st.rerun()
 
 

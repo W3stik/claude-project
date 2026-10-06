@@ -59,6 +59,10 @@ def test_bot_page_switches_to_minute_trading(monkeypatch):
     assert not app.exception, [e.value for e in app.exception]
     widget = {w.label: w for w in [*app.selectbox, *app.number_input]}
     assert widget["Interval"].value == "1m" and widget["Max. obchodů za den"].value == 100
+    assert any("max. 3 pozic najednou, každá do 25 %" in c.value for c in app.caption)
+    widget["Max. pozic najednou"].set_value(5).run()
+    assert any("max. 5 pozic najednou, každá do 20 %" in c.value for c in app.caption)
+    assert next(c for c in app.checkbox if c.label.startswith("Povolit short")).value is False
 
 
 def test_strategy_parameter_inputs_render_for_every_strategy(monkeypatch):

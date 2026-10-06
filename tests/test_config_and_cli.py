@@ -139,3 +139,15 @@ def test_cli_minute_bot(demo_env):
     assert "BTC-USD" in result.output
     assert risk_manager(100).config.max_trades_per_day == 100
     assert risk_manager().config.max_trades_per_day == get_settings().max_trades_per_day
+
+
+def test_cli_bot_with_more_positions_and_shorts(demo_env):
+    from daytrader.cli import risk_manager
+
+    result = runner.invoke(app, ["bot", "--once", "--dry-run", "-s", "scalp", "-i", "1m", "--symbols", "@krypto",
+                                 "--max-positions", "10", "--short"])
+    assert result.exit_code == 0, result.output
+    assert "SHIB-USD" in result.output  # the whole group was used
+    risk = risk_manager(max_positions=10, settings=get_settings().model_copy(update={"allow_short": True}))
+    assert risk.config.max_open_positions == 10 and risk.config.max_position_pct == 10
+    assert risk.config.allow_short

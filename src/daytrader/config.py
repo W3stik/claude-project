@@ -162,12 +162,21 @@ class Settings(BaseSettings):
 
 
 def parse_symbols(text: str | None) -> list[str]:
+    """Symbols from a comma separated list; ``@us``, ``@krypto`` … expand to whole groups."""
+    from .universe import universe, universe_help
+
     if not text:
         return []
     seen: dict[str, None] = {}
     for part in text.replace(";", ",").replace("\n", ",").split(","):
         symbol = part.strip().upper()
-        if symbol:
+        if symbol.startswith("@"):
+            group = universe(symbol)
+            if group is None:
+                raise ConfigError(f"Neznámá skupina symbolů {part.strip()}. Dostupné: {universe_help()}.")
+            for member in group:
+                seen.setdefault(member, None)
+        elif symbol:
             seen.setdefault(symbol, None)
     return list(seen)
 

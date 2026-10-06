@@ -7,6 +7,7 @@ paper trading, not for latency-sensitive execution.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -15,7 +16,7 @@ from typing import Any
 import pandas as pd
 
 from ..models import NewsItem, Quote
-from .base import DataError, DataProvider, normalize_bars, resolve_range, utcnow
+from .base import DataError, DataProvider, DataRateLimited, normalize_bars, resolve_range, utcnow
 
 YF_INTERVALS = {
     "1m": "1m",
@@ -34,6 +35,15 @@ MAX_LOOKBACK_DAYS = {"1m": 7, "2m": 59, "5m": 59, "15m": 59, "30m": 59, "90m": 5
 # Within this window they share one download, which keeps a bot polling every minute well
 # below Yahoo's request limits.
 CACHE_SECONDS = 20.0
+# When Yahoo answers "Too Many Requests", stop asking for a minute (doubling up to 10 minutes).
+RATE_LIMIT_PAUSE = 60.0
+MAX_RATE_LIMIT_PAUSE = 600.0
+RATE_LIMITED = "Yahoo dočasně omezilo počet dotazů – bot to zkusí znovu za chvíli."
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    text = f"{type(exc).__name__} {exc}".lower()
+    return "ratelimit" in text or "rate limit" in text or "too many requests" in text
 
 
 def _default_ticker(symbol: str) -> Any:
@@ -45,6 +55,7 @@ def _default_ticker(symbol: str) -> Any:
 class YahooProvider(DataProvider):
     name = "yahoo"
     supports_news = True
+    parallel_requests = 8  # yfinance downloads tickers in threads itself
 
     def __init__(
         self, ticker_factory: Callable[[str], Any] | None = None, clock: Callable[[], float] = time.monotonic
@@ -53,7 +64,21 @@ class YahooProvider(DataProvider):
         self._clock = clock
         # (symbol, interval) -> (downloaded at, requested start, bars up to the download)
         self._recent: dict[tuple[str, str], tuple[float, pd.Timestamp, pd.DataFrame]] = {}
+        self._lock = threading.Lock()
+        self._pause = 0.0
+        self._paused_until = float("-inf")
         self.last_warning: str | None = None
+
+    def _check_pause(self) -> None:
+        if self._clock() < self._paused_until:
+            raise DataRateLimited(RATE_LIMITED)
+
+    def _pause_after(self, exc: Exception) -> DataRateLimited:
+        with self._lock:
+            if self._clock() >= self._paused_until:  # parallel downloads hit the limit together
+                self._pause = min(MAX_RATE_LIMIT_PAUSE, self._pause * 2) if self._pause else RATE_LIMIT_PAUSE
+                self._paused_until = self._clock() + self._pause
+        return DataRateLimited(RATE_LIMITED)
 
     def _recent_bars(self, symbol: str, yf_interval: str) -> tuple[pd.Timestamp, pd.DataFrame] | None:
         entry = self._recent.get((symbol.upper(), yf_interval))
@@ -88,6 +113,7 @@ class YahooProvider(DataProvider):
             bars = recent[1][(recent[1].index >= start_ts) & (recent[1].index <= end_ts)]
             if not bars.empty:
                 return bars
+        self._check_pause()
         kwargs: dict[str, Any] = {
             "interval": yf_interval,
             "start": int(start_ts.timestamp()),
@@ -99,7 +125,10 @@ class YahooProvider(DataProvider):
         try:
             raw = self._ticker(symbol).history(**kwargs)
         except Exception as exc:  # yfinance raises many different exception types
+            if _is_rate_limit(exc):
+                raise self._pause_after(exc) from exc
             raise DataError(f"Yahoo Finance: chyba při stahování {symbol}: {exc}") from exc
+        self._pause = 0.0
         if raw is None or raw.empty:
             raise DataError(
                 f"Yahoo nevrátil data pro {symbol} ({interval}). Zkontroluj symbol "
@@ -115,11 +144,14 @@ class YahooProvider(DataProvider):
             recent = self._recent_bars(symbol, yf_interval)
             if recent is not None and not recent[1].empty:
                 return float(recent[1]["close"].iloc[-1])  # close of the bar still forming = last trade
+        self._check_pause()
         ticker = self._ticker(symbol)
         for period in ("1d", "5d"):
             try:
                 bars = ticker.history(period=period, interval="1m", prepost=False, auto_adjust=True)
-            except Exception:
+            except Exception as exc:
+                if _is_rate_limit(exc):
+                    raise self._pause_after(exc) from exc
                 bars = None
             if bars is None or bars.empty:
                 continue
