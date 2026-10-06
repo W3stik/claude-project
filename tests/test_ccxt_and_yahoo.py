@@ -148,3 +148,23 @@ def test_demo_data_keeps_working_when_the_clock_moves_on():
     week = provider.get_bars("AAPL", "5m", "5d")
     assert week.index[-1].date() == clock.now.date()
     assert (week.loc[monday.index, "close"] - monday["close"]).abs().max() < 1e-9  # history stays put
+
+
+def test_yahoo_shares_one_download_within_a_bot_cycle():
+    now = pd.Timestamp.now(tz="UTC").floor("min")
+    closes = [100.0 + i for i in range(30)]
+    frame = pd.DataFrame({"Open": closes, "High": closes, "Low": closes, "Close": closes, "Volume": 1.0},
+                         index=pd.date_range(end=now, periods=30, freq="1min"))
+    ticker = FakeTicker(frame)
+    clock = {"t": 0.0}
+    provider = YahooProvider(ticker_factory=lambda symbol: ticker, clock=lambda: clock["t"])
+    assert len(provider.get_bars("AAPL", "1m", "5d")) == 30
+    assert provider.get_latest_price("AAPL") == 129.0  # same download, no new request
+    recent = provider.get_bars("AAPL", "1m", start=now - pd.Timedelta(minutes=5), end=now + pd.Timedelta(minutes=1))
+    assert recent["close"].tolist() == [124.0, 125.0, 126.0, 127.0, 128.0, 129.0]
+    assert len(ticker.calls) == 1
+    provider.get_bars("AAPL", "1m", start=now - pd.Timedelta(hours=2), end=now - pd.Timedelta(hours=1))
+    assert len(ticker.calls) == 2  # a range in the past is always downloaded
+    clock["t"] += 21  # the next bot cycle downloads fresh data
+    provider.get_latest_price("AAPL")
+    assert len(ticker.calls) == 3 and ticker.calls[-1]["period"] == "1d"

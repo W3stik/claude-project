@@ -17,10 +17,10 @@ deník obchodů a volitelný AI komentář**. Ovládá se z webového dashboardu
 |---|---|
 | **Analýza** | Svíčkový graf s EMA 9/21, VWAP a Bollingerovými pásmy, objem, RSI a MACD. Technické skóre −100 až +100 se slovním vysvětlením. Důležité úrovně: včerejší max/min/závěr, pivoty a swingové supporty a rezistence. Zprávy k titulu. |
 | **Scanner** | Seřadí watchlist podle toho, co se právě hýbe: skóre trendu a momenta, relativní objem (RVOL), gap, RSI, ATR a vzdálenost od VWAP. |
-| **Backtest** | 6 strategií (křížení EMA, VWAP trend, průraz ranního rozpětí ORB, RSI, Bollinger, MACD). Počítá s poplatky a skluzem, stop-lossem a take-profitem z ATR a zavíráním pozic na konci dne. Optimalizace parametrů s ověřením na odložených datech. |
+| **Backtest** | 7 strategií (křížení EMA, VWAP trend, průraz ranního rozpětí ORB, RSI, Bollinger, MACD a minutové skalpování). Počítá s poplatky a skluzem, stop-lossem a take-profitem z ATR a zavíráním pozic na konci dne. Optimalizace parametrů s ověřením na odložených datech. |
 | **Obchodování** | Papírový účet (lokální simulace), Alpaca (paper i live), kryptoburzy přes CCXT (Binance, Kraken, Coinbase, Bybit, Coinmate…). Před odesláním příkazu ukáže plán: velikost pozice dopočítanou z rizika, stop-loss, take-profit a poměr zisku k riziku. |
 | **Řízení rizik** | Riziko ~1 % kapitálu na obchod, denní limit ztráty, maximum otevřených pozic, maximum obchodů za den, povinný stop-loss, upozornění na pravidlo PDT. |
-| **Bot** | Automaticky obchoduje zvolenou strategii podle stejných pravidel jako backtest. Umí „suchý běh“ bez odesílání příkazů. |
+| **Bot** | Automaticky obchoduje zvolenou strategii podle stejných pravidel jako backtest, klidně i každou minutu (skalpování). Umí „suchý běh“ bez odesílání příkazů. |
 | **Deník** | Uzavřené obchody, úspěšnost, profit factor, P/L po dnech a export do CSV. |
 | **AI komentář** | Volitelné shrnutí technické situace od Clauda (Claude API, placené podle spotřeby). |
 
@@ -52,7 +52,8 @@ Na Windows při instalaci Pythonu zaškrtni **„Add python.exe to PATH“**.
 3. Aplikaci pak spouštíš dvojklikem na **`start.bat`**. Dashboard se otevře v prohlížeči
    na http://localhost:8501. Černé okno nech otevřené, jinak se aplikace vypne.
 4. Automatické obchodování na papírovém účtu spustíš dvojklikem na **`bot.bat`**
-   (viz [Automatické obchodování](#automatické-obchodování-bot)).
+   (viz [Automatické obchodování](#automatické-obchodování-bot)). Bota, který obchoduje každou minutu,
+   spustí **`bot-1min.bat`** (viz [Minutové obchodování](#minutové-obchodování-skalpování)).
 
 ### Windows – ručně v PowerShellu
 
@@ -181,6 +182,7 @@ zkusí na jiném doporučeném modelu (server-side fallback).
 | `rsi_reversion` | RSI návrat k průměru | Nákup při přeprodaném RSI, výstup při návratu ke středu. |
 | `bollinger` | Bollinger návrat | Nákup pod dolním pásmem, výstup na středové linii. |
 | `macd` | MACD momentum | Obchoduje křížení MACD a signální linie. |
+| `scalp` | Skalpování | Minutové svíčky: v rostoucím trendu nákup po krátkém poklesu, prodej při odrazu, pod VWAP nebo nejpozději po 10 svíčkách. Jen intradenní. |
 
 Parametry se mění přes `--param klic=hodnota` (např. `--param fast=5 --param slow=30`). Seznam vypíše `daytrader strategies`.
 Žádná z nich není „hotový stroj na peníze“. Jsou to výchozí body pro vlastní testování.
@@ -217,7 +219,7 @@ Bot obchoduje sám. Výchozí je **papírový účet**, tedy falešné peníze b
 1. **Dvojklik na `bot.bat`** (Windows). Bot běží v černém okně, dokud ho nezavřeš nebo nestiskneš Ctrl+C.
    Strategii, symboly a interval nastavíš v souboru `.env`:
    ```ini
-   DT_BOT_STRATEGY=vwap_trend        # vwap_trend | orb | ema_cross | rsi_reversion | bollinger | macd
+   DT_BOT_STRATEGY=vwap_trend        # vwap_trend | orb | ema_cross | rsi_reversion | bollinger | macd | scalp
    DT_BOT_INTERVAL=5m
    DT_BOT_SYMBOLS=AAPL,MSFT,NVDA,AMD,TSLA
    DT_BOT_PARAMS=                    # např. fast=9,slow=21
@@ -256,9 +258,39 @@ Jiné burzy (např. Vídeň `.VI`, Varšava `.WA`, Paříž `.PA`) aplikace zat�
 u nich počítal s americkými hodinami, takže mu je nedávej. Krypto se hodí na vyzkoušení bota
 i večer a o víkendu.
 
-**Aby běžel každý den sám:** stiskni Win+R, napiš `shell:startup` a do otevřené složky vlož zástupce na `bot.bat`.
-Bot se pak spustí po každém přihlášení do Windows. Počítač nesmí během obchodních hodin usnout
+**Aby běžel každý den sám:** stiskni Win+R, napiš `shell:startup` a do otevřené složky vlož zástupce na `bot.bat`
+(nebo na `bot-1min.bat`). Bot se pak spustí po každém přihlášení do Windows. Počítač nesmí během obchodních hodin usnout
 (Nastavení → Systém → Napájení).
+
+### Minutové obchodování (skalpování)
+
+Bot se na trh dívá každou minutu a dělá krátké obchody na minutových svíčkách (strategie `scalp`):
+
+- **Nákup** v rostoucím trendu (cena nad VWAP, EMA 20 nad EMA 50) po krátkém poklesu, když se RSI(5) vrátí nad 35.
+- **Prodej**, jakmile RSI vyskočí na 65 (malý zisk), když cena zavře pod VWAP, nebo nejpozději po 10 minutách.
+  Stop-loss a take-profit z ATR platí i tady.
+- Na demo datech udělá zhruba 5–10 obchodů denně na jednu akcii a pozici drží v průměru asi 5 minut.
+
+**Spuštění:** dvojklik na **`bot-1min.bat`** (symboly bere z `DT_BOT_SYMBOLS`, nejvýš 100 obchodů za den),
+v dashboardu strategie *Skalpování* (interval se přepne na 1 minutu a limit obchodů na 100), nebo
+`daytrader bot -s scalp -i 1m --max-trades 100`. Parametry: např. `--param max_hold=5 --param dip=30`,
+jejich popis vypíše `daytrader strategies`.
+
+**Co je dobré vědět:**
+- Víc obchodů neznamená víc zisku. Každý obchod stojí spread a skluz a u minutových obchodů jsou zisky tak malé,
+  že z nich tyhle náklady ukousnou velký kus. Papírový účet počítá se skluzem 0,02 % na každý nákup i prodej
+  (`DT_PAPER_SLIPPAGE_BPS`).
+- Nejdřív si strategii vyzkoušej v backtestu na skutečných datech: `daytrader backtest AAPL -s scalp -i 1m -p 7d`
+  (Yahoo dává minutová data jen za posledních 7 dní) a pak aspoň pár týdnů na papírovém účtu.
+- Hodí se pro likvidní americké akcie a ETF (AAPL, NVDA, SPY, QQQ…) a pro krypto. Pražská burza má data
+  o 20 minut zpožděná a málo obchodů, minutové obchodování tam nedává smysl.
+- Stop-loss na minutových svíčkách je blízko, takže velikost pozice omezí limit 25 % kapitálu (`DT_MAX_POSITION_PCT`)
+  a skutečné riziko na obchod bývá menší než 1 %.
+- Kryptoburzy si berou poplatek zhruba 0,1–0,6 % z každého obchodu, což minutové obchody na skutečném účtu
+  většinou prodělá. Americké pravidlo PDT (minimálně 25 000 USD na účtu pro častý day trading) regulátor
+  od 4. 6. 2026 zrušil, brokeři ho ale můžou rušit postupně až do října 2027. Ověř si, jak to má tvůj broker.
+- Bot stahuje data každou minutu. Dotazy na Yahoo proto slučuje (jedno stažení na symbol za kolo),
+  ale s desítkami symbolů může Yahoo začít požadavky dočasně odmítat.
 
 ## Přechod na živé obchodování
 

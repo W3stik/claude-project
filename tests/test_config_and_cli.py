@@ -128,3 +128,14 @@ def test_cli_bot_uses_bot_settings(monkeypatch):
     settings = get_settings()
     assert settings.bot_param_dict == {"fast": "5", "slow": "30"}
     assert "ema_cross" in settings.masked_summary()["Bot"]
+
+
+def test_cli_minute_bot(demo_env):
+    from daytrader.cli import risk_manager
+
+    result = runner.invoke(app, ["bot", "--once", "--dry-run", "-s", "scalp", "-i", "1m", "--max-trades", "100",
+                                 "--symbols", "BTC-USD"])
+    assert result.exit_code == 0, result.output
+    assert "BTC-USD" in result.output
+    assert risk_manager(100).config.max_trades_per_day == 100
+    assert risk_manager().config.max_trades_per_day == get_settings().max_trades_per_day

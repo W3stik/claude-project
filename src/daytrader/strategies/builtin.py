@@ -173,6 +173,58 @@ class OpeningRangeBreakout(Strategy):
         return pd.Series(out, index=bars.index, name="signal")
 
 
+class Scalp(Strategy):
+    key = "scalp"
+    name = "Skalpování (minutové svíčky)"
+    description = (
+        "Krátké obchody na minutových svíčkách. V rostoucím trendu (cena nad VWAP, rychlá EMA nad pomalou) koupí, "
+        "když se po krátkém poklesu RSI otočí z přeprodané zóny nahoru. Prodá, jakmile RSI vyskočí nahoru (malý "
+        "zisk), když cena zavře pod VWAP, nebo nejpozději po zadaném počtu svíček. Short zrcadlově."
+    )
+    intraday_only = True
+    params_spec = (
+        Param("fast", 20, "Rychlá EMA trendového filtru", min=2, max=200, step=1),
+        Param("slow", 50, "Pomalá EMA trendového filtru", min=3, max=400, step=5),
+        Param("rsi", 5, "Perioda RSI", min=2, max=50, step=1),
+        Param("dip", 35.0, "Vstup, když se RSI vrátí nad tuto hranici", min=5, max=49, step=1),
+        Param("take", 65.0, "Výstup se ziskem, když RSI dosáhne této hranice", min=51, max=95, step=1),
+        Param("max_hold", 10, "Nejdelší držení pozice (svíček)", min=1, max=240, step=1),
+    )
+
+    def validate(self) -> None:
+        if self.params["fast"] >= self.params["slow"]:
+            raise ValueError("Rychlá EMA musí mít kratší periodu než pomalá.")
+
+    def generate_signals(self, bars: pd.DataFrame) -> pd.Series:
+        close = bars["close"]
+        c = close.to_numpy()
+        fast = ema(close, self.params["fast"]).to_numpy()
+        slow = ema(close, self.params["slow"]).to_numpy()
+        v = vwap(bars).to_numpy()
+        r = rsi(close, self.params["rsi"]).to_numpy()
+        keys = session_keys(bars.index)
+        dip, take, max_hold = self.params["dip"], self.params["take"], int(self.params["max_hold"])
+        out = np.zeros(len(bars), dtype=int)
+        state = held = 0
+        for i in range(1, len(bars)):
+            if keys[i] != keys[i - 1]:
+                state = 0  # positions are closed at the end of every session
+            if state:
+                held += 1
+                if state == 1 and (r[i] >= take or c[i] < v[i] or held >= max_hold):
+                    state = 0
+                elif state == -1 and (r[i] <= 100 - take or c[i] > v[i] or held >= max_hold):
+                    state = 0
+                out[i] = state
+                continue  # a new trade needs a new dip, not the bar of the exit
+            if c[i] > v[i] and fast[i] > slow[i] and r[i - 1] < dip <= r[i]:
+                state, held = 1, 0
+            elif c[i] < v[i] and fast[i] < slow[i] and r[i - 1] > 100 - dip >= r[i]:
+                state, held = -1, 0
+            out[i] = state
+        return pd.Series(out, index=bars.index, name="signal")
+
+
 class MacdMomentum(Strategy):
     key = "macd"
     name = "MACD momentum"

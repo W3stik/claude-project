@@ -312,3 +312,23 @@ def test_bot_never_goes_back_to_an_older_bar_on_a_quiet_feed(tmp_path):
         bot.run_once()
         clock.now += timedelta(minutes=1)
     assert len(seen) > 3 and seen == sorted(set(seen))
+
+
+def test_minute_bot_scalps_with_short_holds(tmp_path):
+    import pandas as pd
+
+    clock = Clock(datetime(2026, 9, 21, 13, 30, 3, tzinfo=timezone.utc))  # Monday 9:30 New York
+    provider = SyntheticProvider(now=clock)
+    broker = PaperBroker(tmp_path / "paper.db", provider, clock=clock)
+    bot = TradingBot(broker, provider, get_strategy("scalp"), RiskManager(RiskConfig(max_trades_per_day=100)),
+                     Journal(tmp_path / "journal.db"), BotConfig(symbols=["AAPL", "NVDA", "SPY"], interval="1m"),
+                     clock=clock)
+    actions = []
+    for _ in range(180):  # checks the market every minute
+        actions += bot.run_once()
+        clock.now += timedelta(minutes=1)
+    assert not [a.message for a in actions if a.action == "error"]
+    trips = round_trips(broker.get_fills())
+    assert len(trips) >= 5
+    minutes = (pd.to_datetime(trips["exit_time"]) - pd.to_datetime(trips["entry_time"])).dt.total_seconds() / 60
+    assert minutes.max() <= 11  # max_hold = 10 bars

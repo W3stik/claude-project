@@ -34,6 +34,7 @@ from .models import Side
 from .risk import RiskConfig, RiskManager
 from .scanner import scan as run_scan
 from .strategies import STRATEGIES, get_strategy
+from .timeframes import interval_seconds
 from .trading import OrderPlan, execute_plan, plan_order
 
 
@@ -133,8 +134,11 @@ def journal_for() -> Journal:
     return Journal(get_settings().ensure_data_dir() / "journal.db")
 
 
-def risk_manager() -> RiskManager:
-    return RiskManager(RiskConfig.from_settings(get_settings()))
+def risk_manager(max_trades: int | None = None) -> RiskManager:
+    config = RiskConfig.from_settings(get_settings())
+    if max_trades is not None:
+        config.max_trades_per_day = max_trades
+    return RiskManager(config)
 
 
 def make_broker(broker: str | None, provider: str | None) -> tuple[Broker, DataProvider]:
@@ -556,6 +560,7 @@ def bot(
     param: Annotated[list[str] | None, typer.Option("--param", help="Parametr strategie klic=hodnota [DT_BOT_PARAMS]")] = None,
     interval: Annotated[str | None, typer.Option("--interval", "-i", help="Interval svíček [DT_BOT_INTERVAL]")] = None,
     lookback: Annotated[str, typer.Option(help="Kolik historie načítat pro signály")] = "5d",
+    max_trades: Annotated[int | None, typer.Option("--max-trades", min=1, help="Max. obchodů za den [DT_MAX_TRADES_PER_DAY]")] = None,
     broker: BrokerOpt = None,
     provider: ProviderOpt = None,
     once: Annotated[bool, typer.Option("--once", help="Jen jedno vyhodnocení a konec")] = False,
@@ -577,7 +582,8 @@ def bot(
     interval = interval or settings.bot_interval
     if not dry_run:
         confirm_live(brk, yes, f"spuštění bota {strat.label()} na {', '.join(watch)}")
-    trading_bot = TradingBot(brk, data, strat, risk_manager(), journal_for(),
+    risk = risk_manager(max_trades)
+    trading_bot = TradingBot(brk, data, strat, risk, journal_for(),
                              BotConfig(symbols=watch, interval=interval, lookback=lookback, dry_run=dry_run))
     last_notice = {"at": float("-inf")}
 
@@ -613,9 +619,13 @@ def bot(
         f"Strategie: {strat.label()}\n"
         f"Symboly: {', '.join(watch)} · interval {interval}\n"
         f"Broker: {brk.name} ({mode}) · kapitál {fmt(account.equity)} {account.currency}\n"
+        f"Max. obchodů za den: {risk.config.max_trades_per_day} · max. otevřených pozic: {risk.config.max_open_positions}\n"
         "Bot vyhodnotí každou uzavřenou svíčku; mimo obchodní hodiny čeká. Zastavíš ho klávesami Ctrl+C.",
         title="Obchodní bot", border_style="red" if brk.is_live and not dry_run else "blue",
     ))
+    if interval_seconds(interval) <= 60 and risk.config.max_trades_per_day < 30:
+        console.print(f"[yellow]Na minutových svíčkách bot obchoduje často a limit {risk.config.max_trades_per_day} "
+                      "obchodů za den rychle vyčerpá. Zvyš ho volbou --max-trades nebo v .env (DT_MAX_TRADES_PER_DAY).[/]")
     stop_event = threading.Event()
     try:
         trading_bot.run_forever(stop_event, on_decisions=show)

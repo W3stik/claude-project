@@ -39,3 +39,41 @@ def test_charts_build(bars, mode):
     fig = charts.price_chart(df, mode, trades=trades, show_rsi=False, show_macd=False)
     assert any(trace.name == "Výstup" for trace in fig.data)
     assert charts.equity_chart(result.equity, mode=mode).data
+
+
+def test_bot_page_switches_to_minute_trading(monkeypatch):
+    monkeypatch.setenv("DT_DATA_PROVIDER", "demo")
+    get_settings.cache_clear()
+
+    def page():
+        from daytrader.dashboard.views import bot_page
+
+        bot_page()
+
+    app = AppTest.from_function(page, default_timeout=120)
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+    widget = {w.label: w for w in [*app.selectbox, *app.number_input]}
+    assert widget["Interval"].value == "5m" and widget["Max. obchodů za den"].value == 10
+    widget["Strategie"].select("scalp").run()
+    assert not app.exception, [e.value for e in app.exception]
+    widget = {w.label: w for w in [*app.selectbox, *app.number_input]}
+    assert widget["Interval"].value == "1m" and widget["Max. obchodů za den"].value == 100
+
+
+def test_strategy_parameter_inputs_render_for_every_strategy(monkeypatch):
+    from daytrader.strategies import STRATEGIES
+
+    monkeypatch.setenv("DT_DATA_PROVIDER", "demo")
+    get_settings.cache_clear()
+
+    def page():
+        from daytrader.dashboard.views import bot_page
+
+        bot_page()
+
+    app = AppTest.from_function(page, default_timeout=120)
+    app.run()
+    for key in STRATEGIES:
+        next(w for w in app.selectbox if w.label == "Strategie").select(key).run()
+        assert not app.exception, (key, [e.value for e in app.exception])

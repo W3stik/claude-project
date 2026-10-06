@@ -1,11 +1,11 @@
 from typing import Any
 
 from .base import Param, Strategy, positions_from_events
-from .builtin import BollingerReversion, EmaCross, MacdMomentum, OpeningRangeBreakout, RsiReversion, VwapTrend
+from .builtin import BollingerReversion, EmaCross, MacdMomentum, OpeningRangeBreakout, RsiReversion, Scalp, VwapTrend
 
 STRATEGIES: dict[str, type[Strategy]] = {
     cls.key: cls
-    for cls in (EmaCross, VwapTrend, OpeningRangeBreakout, RsiReversion, BollingerReversion, MacdMomentum)
+    for cls in (EmaCross, VwapTrend, OpeningRangeBreakout, RsiReversion, BollingerReversion, MacdMomentum, Scalp)
 }
 
 

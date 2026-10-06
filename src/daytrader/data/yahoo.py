@@ -7,6 +7,7 @@ paper trading, not for latency-sensitive execution.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -29,6 +30,10 @@ YF_INTERVALS = {
 }
 # Yahoo only serves limited intraday history.
 MAX_LOOKBACK_DAYS = {"1m": 7, "2m": 59, "5m": 59, "15m": 59, "30m": 59, "90m": 59, "60m": 729}
+# One bot cycle asks for the same symbol several times (bars, latest price, paper fills).
+# Within this window they share one download, which keeps a bot polling every minute well
+# below Yahoo's request limits.
+CACHE_SECONDS = 20.0
 
 
 def _default_ticker(symbol: str) -> Any:
@@ -41,9 +46,20 @@ class YahooProvider(DataProvider):
     name = "yahoo"
     supports_news = True
 
-    def __init__(self, ticker_factory: Callable[[str], Any] | None = None) -> None:
+    def __init__(
+        self, ticker_factory: Callable[[str], Any] | None = None, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self._ticker = ticker_factory or _default_ticker
+        self._clock = clock
+        # (symbol, interval) -> (downloaded at, requested start, bars up to the download)
+        self._recent: dict[tuple[str, str], tuple[float, pd.Timestamp, pd.DataFrame]] = {}
         self.last_warning: str | None = None
+
+    def _recent_bars(self, symbol: str, yf_interval: str) -> tuple[pd.Timestamp, pd.DataFrame] | None:
+        entry = self._recent.get((symbol.upper(), yf_interval))
+        if entry is None or self._clock() - entry[0] > CACHE_SECONDS:
+            return None
+        return entry[1], entry[2]
 
     def get_bars(
         self,
@@ -66,6 +82,12 @@ class YahooProvider(DataProvider):
                 self.last_warning = (
                     f"Yahoo poskytuje interval {interval} jen za posledních {max_days} dní – období bylo zkráceno."
                 )
+        up_to_now = end is None or end_ts >= pd.Timestamp(utcnow())
+        recent = self._recent_bars(symbol, yf_interval) if up_to_now else None
+        if recent is not None and recent[0] <= start_ts:
+            bars = recent[1][(recent[1].index >= start_ts) & (recent[1].index <= end_ts)]
+            if not bars.empty:
+                return bars
         kwargs: dict[str, Any] = {
             "interval": yf_interval,
             "start": int(start_ts.timestamp()),
@@ -83,17 +105,31 @@ class YahooProvider(DataProvider):
                 f"Yahoo nevrátil data pro {symbol} ({interval}). Zkontroluj symbol "
                 "(pražské akcie mají příponu .PR, např. CEZ.PR) nebo zkus jiné období."
             )
-        return normalize_bars(raw)
+        bars = normalize_bars(raw)
+        if up_to_now:
+            self._recent[(symbol.upper(), yf_interval)] = (self._clock(), start_ts, bars.copy())
+        return bars
 
     def get_latest_price(self, symbol: str) -> float:
+        for yf_interval in ("1m", "2m", "5m", "15m", "30m", "60m", "90m"):
+            recent = self._recent_bars(symbol, yf_interval)
+            if recent is not None and not recent[1].empty:
+                return float(recent[1]["close"].iloc[-1])  # close of the bar still forming = last trade
         ticker = self._ticker(symbol)
         for period in ("1d", "5d"):
             try:
                 bars = ticker.history(period=period, interval="1m", prepost=False, auto_adjust=True)
             except Exception:
                 bars = None
-            if bars is not None and not bars.empty:
-                return float(bars["Close"].dropna().iloc[-1])
+            if bars is None or bars.empty:
+                continue
+            try:
+                frame = normalize_bars(bars)
+            except DataError:
+                continue
+            if not frame.empty:
+                self._recent[(symbol.upper(), "1m")] = (self._clock(), frame.index[0], frame)
+                return float(frame["close"].iloc[-1])
         try:
             price = ticker.fast_info.last_price
         except Exception as exc:

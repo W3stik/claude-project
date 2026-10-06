@@ -235,7 +235,10 @@ def _strategy_params(strategy_key: str, prefix: str) -> dict:
                                                   max_value=int(p.max) if p.max is not None else None,
                                                   step=int(p.step or 1), key=key))
         else:
-            params[p.name] = float(col.number_input(p.description, value=float(p.default), min_value=p.min, max_value=p.max,
+            # Streamlit refuses to mix int and float arguments
+            params[p.name] = float(col.number_input(p.description, value=float(p.default),
+                                                    min_value=float(p.min) if p.min is not None else None,
+                                                    max_value=float(p.max) if p.max is not None else None,
                                                     step=float(p.step or 0.1), key=key))
     return params
 
@@ -596,8 +599,9 @@ def bot_page() -> None:
         "**Tipy:** Americký trh je otevřený po–pá 15:30–22:00 našeho času, pražská burza 9:00–16:20, "
         "mimo tuto dobu bot čeká. "
         "Chceš-li bota vyzkoušet hned, přidej krypto (např. BTC-USD), které se obchoduje nonstop. "
-        "Bot běží jen dokud běží dashboard. Pro samostatný běh použij `bot.bat` "
-        "(nastavení v souboru `.env`, řádky `DT_BOT_...`).",
+        "Pro obchodování každou minutu vyber strategii *Skalpování* – interval se přepne na 1 minutu. "
+        "Bot běží jen dokud běží dashboard. Pro samostatný běh použij `bot.bat`, minutového bota spustí "
+        "`bot-1min.bat` (nastavení v souboru `.env`, řádky `DT_BOT_...`).",
         icon="ℹ️",
     )
 
@@ -615,17 +619,22 @@ def _bot_status(runner) -> None:
 
 
 def _bot_form(runner, broker, cfg, blocked: bool) -> None:
-    c1, c2 = st.columns([3, 1])
-    symbols_text = c1.text_input(
+    symbols_text = st.text_input(
         "Symboly", value=", ".join(cfg.bot_symbol_list),
         help="Americké akcie (AAPL), Praha (CEZ.PR), Xetra (SAP.DE), Londýn (VOD.L), krypto (BTC-USD) – "
         "krypto se obchoduje nonstop.",
     )
-    interval = c2.selectbox("Interval", BOT_INTERVALS,
-                            index=BOT_INTERVALS.index(cfg.bot_interval) if cfg.bot_interval in BOT_INTERVALS else 1)
     keys = list(STRATEGIES)
-    strategy_key = st.selectbox("Strategie", keys, format_func=lambda k: STRATEGIES[k].name,
+    c1, c2, c3 = st.columns([2, 1, 1])
+    strategy_key = c1.selectbox("Strategie", keys, format_func=lambda k: STRATEGIES[k].name,
                                 index=keys.index(cfg.bot_strategy) if cfg.bot_strategy in keys else keys.index("vwap_trend"))
+    # Scalping is meant for 1-minute bars, and trading every few minutes needs a higher daily trade limit.
+    default_interval = "1m" if strategy_key == "scalp" else cfg.bot_interval
+    interval = c2.selectbox("Interval", BOT_INTERVALS, key=f"bot_interval_{strategy_key}",
+                            index=BOT_INTERVALS.index(default_interval) if default_interval in BOT_INTERVALS else 1)
+    default_trades = max(cfg.max_trades_per_day, 100) if interval == "1m" else cfg.max_trades_per_day
+    max_trades = int(c3.number_input("Max. obchodů za den", min_value=1, max_value=1000, value=default_trades,
+                                     step=10, key=f"bot_max_trades_{interval}"))
     st.caption(STRATEGIES[strategy_key].description)
     with st.expander("Parametry strategie"):
         params = _strategy_params(strategy_key, "bot")
@@ -649,7 +658,9 @@ def _bot_form(runner, broker, cfg, blocked: bool) -> None:
             if bot_broker.is_live and not dry_run:
                 raise ValueError("Živého bota spouštěj z příkazové řádky (daytrader bot), kde se potvrzuje ručně.")
             strategy = get_strategy(strategy_key, **params)
-            bot = TradingBot(bot_broker, provider, strategy, _risk(), Journal(cfg.ensure_data_dir() / "journal.db"),
+            risk = _risk()
+            risk.config.max_trades_per_day = max_trades
+            bot = TradingBot(bot_broker, provider, strategy, risk, Journal(cfg.ensure_data_dir() / "journal.db"),
                              BotConfig(symbols=symbols, interval=interval, dry_run=dry_run))
             runner.start(bot, f"{strategy.label()} · {', '.join(symbols)} · {interval}{' · jen sledování' if dry_run else ''}")
         st.rerun()
