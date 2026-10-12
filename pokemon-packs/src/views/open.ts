@@ -215,7 +215,6 @@ class OpeningStage {
         h(
           "div",
           { class: "flip" },
-          h("div", { class: "flip__core" }),
           h("div", { class: "flip__front" }, front),
           h("div", { class: "flip__back" }, cardBack()),
         ),

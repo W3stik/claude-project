@@ -505,7 +505,7 @@ a.chip {
 /* --- Balíček (3D) --------------------------------------------------------- */
 
 .pack3d {
-  --depth: 6px;
+  --depth: 4px;
   --ratio: 0.55;
   --spin: 0deg;
   position: relative;
@@ -574,15 +574,28 @@ a.chip {
 
 .pack3d__face--front {
   transform: translateZ(calc(var(--depth) / 2));
+  /* obal je vyboulený: k bočním hranám lehce tmavne */
+  box-shadow:
+    inset 10px 0 12px -8px rgb(0 0 0 / 0.38),
+    inset -10px 0 12px -8px rgb(0 0 0 / 0.38);
 }
 
 .pack3d__face--back {
   transform: rotateY(180deg) translateZ(calc(var(--depth) / 2));
-  filter: brightness(0.5) saturate(0.7);
+}
+
+.pack3d__backart {
+  position: absolute;
+  inset: -8%;
+  background: inherit;
+  background-size: 100% 100%;
+  transform: scaleX(-1);
+  filter: blur(6px) brightness(0.42) saturate(0.75);
 }
 
 .pack3d__face--back::after {
   /* zadní strana: svislý lepený šev uprostřed */
+  z-index: 1;
   content: "";
   position: absolute;
   top: 0;
@@ -593,7 +606,8 @@ a.chip {
 }
 
 .pack3d__piece--top .pack3d__face {
-  clip-path: inset(0 0 91% 0);
+  /* lehký přesah přes hranu řezu, aby mezi díly nebyla vlasová spára */
+  clip-path: inset(0 0 90.6% 0);
 }
 
 .pack3d__piece--main .pack3d__face {
@@ -691,13 +705,25 @@ a.chip {
   }
 }
 
+/* Boky: barva z okraje fotky (úzký proužek roztažený přes hloubku), ztmavená
+   jako ve stínu. K zatavenému horu a spodku se zužují do ztracena jako u
+   skutečného „polštářkového“ obalu. */
 .pack3d__side {
   position: absolute;
-  top: 9%;
+  top: 0;
   bottom: 0;
   width: var(--depth);
-  background: linear-gradient(180deg, var(--c2), var(--c1));
-  filter: brightness(0.75);
+  background:
+    var(--art, none) 0 0 / 4000% 100% no-repeat,
+    linear-gradient(180deg, var(--c2), var(--c1));
+  filter: brightness(0.55) saturate(0.9);
+  clip-path: inset(10% 0 4% 0 round 999px);
+}
+
+.pack3d__side--right {
+  background-position:
+    100% 0,
+    0 0;
 }
 
 .pack3d__side--left {
@@ -796,7 +822,7 @@ a.chip {
 }
 
 .pack3d--big {
-  --depth: 14px;
+  --depth: 9px;
   width: min(60vw, 270px);
   font-size: 18px;
   cursor: grab;
@@ -819,6 +845,8 @@ a.chip {
   box-shadow: 0 0 12px 3px #fff;
   border-radius: 2px;
   transform: translateZ(calc(var(--depth) / 2 + 1px));
+  /* bez tahu prstem není řez vidět ani jako svítící tečka */
+  opacity: min(1, calc(var(--cut, 0) * 25));
   pointer-events: none;
 }
 
@@ -1223,7 +1251,7 @@ a.chip {
   display: flex;
 }
 
-/* Karta má líc, rub a mezi nimi tenké jádro, takže při otáčení je vidět hrana. */
+/* Karta má líc a rub; při odhození do strany je vidět i rub. */
 .flip {
   position: relative;
   width: 100%;
@@ -1245,13 +1273,6 @@ a.chip {
 
 .flip__back {
   transform: rotateY(180deg) translateZ(1px);
-}
-
-.flip__core {
-  position: absolute;
-  inset: 0.5%;
-  border-radius: 4.6% / 3.3%;
-  background: #d9dde6;
 }
 
 .is-revealed .pcard__inner {

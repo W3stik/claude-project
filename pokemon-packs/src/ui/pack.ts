@@ -45,8 +45,13 @@ function fallbackArt(set: SetInfo): HTMLElement {
 export function packEl(set: SetInfo, opts: { large?: boolean; tilt?: boolean; hint?: number } = {}): HTMLElement {
   const [c1, c2] = packProfile(set.id).colors;
   const art = packArtUrl(set.id, opts.large);
+  // Zadní strana: rozmazaná a ztmavená fotka (skutečný rub obalu nemáme), ať text nejde přečíst.
   const face = (side: "front" | "back") =>
-    h("div", { class: `pack3d__face pack3d__face--${side}` }, side === "front" ? fallbackArt(set) : null);
+    h(
+      "div",
+      { class: `pack3d__face pack3d__face--${side}` },
+      side === "front" ? fallbackArt(set) : h("div", { class: "pack3d__backart" }),
+    );
   const mainFront = face("front");
   if (opts.hint) mainFront.append(twinkle(opts.hint));
 
