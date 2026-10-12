@@ -1,5 +1,7 @@
 // Dočasná sonda: ověří zdroje obrázků balíčků, rubu karty a cen z běžné sítě.
 const ORIGIN = "https://w3stik.github.io";
+const UA = { "User-Agent": "BoosterLab/0.1 (fan pack simulator)" };
+const tcgcsv = async (path) => (await (await fetch(`https://tcgcsv.com/tcgplayer/3/${path}`, { headers: UA })).json()).results;
 const SETS = ["Destined Rivals", "Black Bolt", "White Flare", "Mega Evolution", "Phantasmal Flames", "Ascended Heroes", "Perfect Order", "Chaos Rising", "Pitch Black", "30th Celebration"];
 
 async function head(url, extra = {}) {
@@ -13,12 +15,12 @@ async function head(url, extra = {}) {
 }
 
 console.log("== groups");
-const groups = (await (await fetch("https://tcgcsv.com/tcgplayer/3/groups")).json()).results;
+const groups = await tcgcsv("groups");
 for (const name of SETS) {
   const gs = groups.filter((g) => g.name.toLowerCase().includes(name.toLowerCase()));
   for (const g of gs) {
     console.log(`GROUP ${g.groupId} | ${g.name} | ${g.abbreviation} | ${g.publishedOn}`);
-    const prods = (await (await fetch(`https://tcgcsv.com/tcgplayer/3/${g.groupId}/products`)).json()).results;
+    const prods = await tcgcsv(`${g.groupId}/products`);
     for (const p of prods.filter((p) => /booster pack|pack art/i.test(p.name) || /booster/i.test(p.name) && !p.extendedData?.some((e) => e.name === "Number"))) {
       console.log(`  PROD ${p.productId} | ${p.name} | ${p.imageUrl}`);
     }
