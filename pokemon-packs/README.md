@@ -46,6 +46,7 @@ npm run dev        # vývojový server na http://localhost:5173
 npm test           # testy generátoru balíčků
 npm run build      # produkční build do dist/
 npm run preview    # náhled buildu (včetně service workeru)
+npm run e2e        # automatický průchod aplikací v Chromiu (po buildu; poprvé npx playwright install chromium)
 ```
 
 ### Instalace jako aplikace

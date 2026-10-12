@@ -4,6 +4,9 @@ Nástroj pro intradenní obchodování v Pythonu: **technická analýza, scanner
 papírové i živé obchodování přes API (Alpaca, kryptoburzy přes CCXT), obchodní bot,
 deník obchodů a volitelný AI komentář**. Ovládá se z webového dashboardu nebo z příkazové řádky, obojí česky.
 
+> V repozitáři je ve složce [`pokemon-packs/`](pokemon-packs/) i druhá, nezávislá aplikace **Booster Lab**
+> (simulátor otevírání balíčků Pokémon TCG). Pokyny pro AI agenty jsou v [`CLAUDE.md`](CLAUDE.md).
+
 > ⚠️ **Upozornění.** Aplikace slouží ke vzdělávání a výzkumu, nejde o investiční doporučení.
 > Day trading je vysoce rizikový a většina začínajících obchodníků prodělává.
 > Výchozí nastavení proto obchoduje jen na **papírovém (simulovaném) účtu**. Živé obchodování

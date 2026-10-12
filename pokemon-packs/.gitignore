@@ -1,3 +1,4 @@
 node_modules/
 dist/
 public/data/prices.json
+e2e-shots/
