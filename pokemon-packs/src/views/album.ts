@@ -1,6 +1,6 @@
 import { cardNumber, loadCards, loadSets, setIdOfCard } from "../data";
 import { RARITIES, rarityInfo } from "../odds";
-import { type CardPrice, formatEur, formatUsd, loadSetPrices, sortValue, variantPrice } from "../prices";
+import { addPrice, type CardPrice, formatEur, formatTotal, formatUsd, loadSetPrices, type PriceTotal, sortValue, variantPrice } from "../prices";
 import { countsFor, getState } from "../store";
 import type { Card, SetInfo, Variant } from "../types";
 import { h } from "../ui/dom";
@@ -53,18 +53,18 @@ function ownedOf(cards: Card[]): Owned[] {
 }
 
 /** Hodnota všech vlastněných kusů (včetně duplikátů). */
-function collectionValue(owned: Owned[], prices: Record<string, CardPrice>) {
-  let eur = 0;
-  let usd = 0;
+function collectionValue(owned: Owned[], prices: Record<string, CardPrice>): PriceTotal {
+  const total: PriceTotal = {};
   for (const o of owned) {
     for (const [variant, n] of Object.entries(o.counts) as [Variant, number][]) {
-      const p = variantPrice(prices[o.card.id], variant);
-      eur += (p.eur ?? 0) * n;
-      usd += (p.usd ?? 0) * n;
+      addPrice(total, variantPrice(prices[o.card.id], variant), n);
     }
   }
-  return { eur, usd };
+  return total;
 }
+
+/** Provedení, které ukazuje dlaždice v albu (reverse / vzorované holo má přednost před normálním); podle něj i cena. */
+const shownVariant = (o: Owned): Variant => (Object.keys(o.counts) as Variant[]).find((v) => v !== "normal") ?? "normal";
 
 const priceIds = (cards: Card[]) => [...new Set(cards.map((c) => setIdOfCard(c.id)))];
 
@@ -125,8 +125,7 @@ async function renderOverview(root: HTMLElement) {
     return;
   }
   const prices = await loadSetPrices(ownedSets.flatMap((p) => priceIds(p.owned.map((o) => o.card))));
-  const v = collectionValue(all, prices);
-  valueEl.textContent = `${formatEur(v.eur)} · ${formatUsd(v.usd)}`;
+  valueEl.textContent = formatTotal(collectionValue(all, prices));
 }
 
 // --- Album jedné sady ------------------------------------------------------
@@ -139,7 +138,7 @@ function sortOwned(list: Owned[], sort: Sort, prices: Record<string, CardPrice>)
     rarity: (a, b) => rarityInfo(b.card.rarity).rank - rarityInfo(a.card.rarity).rank || byNumber(a, b),
     name: (a, b) => a.card.name.localeCompare(b.card.name, "cs") || byNumber(a, b),
     price: (a, b) =>
-      sortValue(variantPrice(prices[b.card.id], "normal")) - sortValue(variantPrice(prices[a.card.id], "normal")) ||
+      sortValue(variantPrice(prices[b.card.id], shownVariant(b))) - sortValue(variantPrice(prices[a.card.id], shownVariant(a))) ||
       byNumber(a, b),
     count: (a, b) => b.total - a.total || byNumber(a, b),
   };
@@ -149,8 +148,8 @@ function sortOwned(list: Owned[], sort: Sort, prices: Record<string, CardPrice>)
 function tile(o: Owned, set: SetInfo, prices: Record<string, CardPrice>): HTMLElement {
   const info = rarityInfo(o.card.rarity);
   const variants = (Object.keys(o.counts) as Variant[]).filter((v) => v !== "normal");
-  const shown = variants[0] ?? "normal";
-  const price = variantPrice(prices[o.card.id], "normal");
+  const shown = shownVariant(o);
+  const price = variantPrice(prices[o.card.id], shown);
   return h(
     "button",
     { class: `album-tile${o.total ? "" : " album-tile--missing"}`, onclick: () => openCardModal(o.card, set) },
@@ -274,8 +273,7 @@ async function renderSetAlbum(root: HTMLElement, setId: string) {
   render();
 
   prices = await loadSetPrices(priceIds(cards));
-  const v = collectionValue(owned, prices);
-  valueEl.textContent = `${formatEur(v.eur)} · ${formatUsd(v.usd)}`;
+  valueEl.textContent = st.unique ? formatTotal(collectionValue(owned, prices)) : formatEur(0);
   if (grid.isConnected) render();
 }
 

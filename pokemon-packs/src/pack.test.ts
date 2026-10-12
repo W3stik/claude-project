@@ -84,6 +84,28 @@ describe("otevírání balíčků", () => {
     }
   });
 
+  it("vzácný výsledek bez karet v sadě dá výchozí raritu, ne další vzácný výsledek", () => {
+    const pools = byRarity(cardsOf("me1"));
+    const profile = {
+      colors: ["#000", "#fff"] as [string, string],
+      sources: [],
+      slots: [
+        {
+          label: "Test",
+          count: 1,
+          hits: [
+            { rarities: ["Neexistující"], variant: "normal" as const, p: 0.5 },
+            { rarities: ["Rare"], variant: "normal" as const, p: 0.5 },
+          ],
+          base: { rarities: ["Common"], variant: "normal" as const },
+        },
+      ],
+    };
+    const rolls = [0.3, 0];
+    const pack = openPack(profile, pools, () => rolls.shift() ?? 0);
+    expect(pack[0].card.rarity).toBe("Common");
+  });
+
   it("četnost rarit odpovídá nastaveným šancím", () => {
     const profile = packProfile("me2");
     const pools = byRarity(cardsOf("me2"));

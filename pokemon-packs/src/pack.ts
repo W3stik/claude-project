@@ -33,8 +33,9 @@ export function openPack(profile: PackProfile, pools: Map<string, Card[]>, rng: 
       let roll = rng();
       for (const hit of slot.hits) {
         const p = hit.p ?? 0;
-        if (roll < p && poolFor(hit, pools).length > 0) {
-          outcome = hit;
+        if (roll < p) {
+          // Když sada takovou kartu nemá, padne výchozí rarita (ne další vzácný výsledek).
+          if (poolFor(hit, pools).length > 0) outcome = hit;
           break;
         }
         roll -= p;

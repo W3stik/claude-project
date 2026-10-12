@@ -10,7 +10,7 @@ repozitář v `../CLAUDE.md`.
 ```bash
 npm install
 npm run dev        # vývojový server http://localhost:5173
-npm test           # Vitest (src/pack.test.ts): data, šance, generátor, regál – 11 testů
+npm test           # Vitest: data, šance, generátor, regál (pack.test.ts), stav a záloha (store.test.ts), ceny (prices.test.ts)
 npm run build      # tsc --noEmit + vite build → dist/  (vždy před commitem)
 npm run e2e        # Playwright průchod celou aplikací nad buildem, snímky v e2e-shots/
                    # (poprvé: npx playwright install chromium); obrázky a API podvrhuje
@@ -31,8 +31,10 @@ Každá obrazovka se kreslí do nového kontejneru (pomalé načítání staré 
 | `scripts/fetch-prices.mjs` | Ceny z TCGdex pro všechny karty → `public/data/prices.json` (`{updated, source, cards: {id: {eur, eurReverse, usd, usdReverse}}}`). Sady páruje podle jména, karty podle čísla. Běží v CI před buildem. |
 | `src/odds.ts` | **Rarity** (`RARITIES`: pořadí, barva, typ lesku, zda je to „hit“) a **profily balíčků** (`PACKS`): sloty, šance a zdroje pro každou sadu. `DEFAULT_PACK` pro sadu bez profilu. |
 | `src/pack.ts` | `openPack(profile, pools, rng)` – v každém slotu losuje vzácné výsledky podle šance, jinak výchozí raritu; bez opakování karty+provedení v balíčku. `toSealed/fromSealed` (uložitelná podoba balíčku), `hintLevel` (síla tajného náznaku). |
-| `src/store.ts` | Stav hry v `localStorage` pod klíčem `pokemon-packs:state:v1`: `packs` (počty neotevřených), `collection` (klíč `idKarty|provedení` → kusy), `firstSeen`, `opened`, `history`, `shelf` (regál 10 balíčků na sadu), `sealed` (vybrané balíčky s daným obsahem, jsou součástí `packs`). Export/import zálohy. |
-| `src/prices.ts` | Ceny: 1) `data/prices.json` z buildu, 2) živě Pokémon TCG API po sadách (s opakováním při 5xx, cache 12 h v localStorage), 3) `tcgdexPrice` živě pro jednu kartu v detailu. |
+| `src/store.ts` | Stav hry v `localStorage` pod klíčem `pokemon-packs:state:v1`: `packs` (počty neotevřených), `collection` (klíč `idKarty|provedení` → kusy), `firstSeen`, `opened`, `history`, `shelf` (regál 10 balíčků na sadu), `sealed` (vybrané balíčky s daným obsahem, jsou součástí `packs`). Každá změna jde přes `mutate()`, která nejdřív znovu načte uložený stav (dvě okna si nepřepisují karty); událost `storage` převezme změny z jiného okna. `sanitize()` kontroluje stav z úložiště i ze zálohy (`parseBackup`, `importState`). |
+| `src/storage.ts` | Trvalé úložiště (`navigator.storage.persist`, žádá se po prvních kartách v `main.ts`), datum poslední zálohy a připomínka zálohy. |
+| `src/prices.ts` | Ceny: 1) `data/prices.json` z buildu, 2) živě Pokémon TCG API po sadách (s opakováním při 5xx, cache 12 h v localStorage), 3) `tcgdexPrice` živě pro jednu kartu v detailu. Součty přes `addPrice`/`formatTotal` (měna bez cen se nezobrazí jako 0). |
+| `src/tcgdexPricing.js` | Výklad cen TCGdex sdílený aplikací i `scripts/fetch-prices.mjs` (čisté JS + `.d.ts`, aby ho Node spustil bez překladu). |
 | `src/data.ts` | Načítání `sets.json` a karet sady (cache), `setIdOfCard`, `cardNumber`. |
 | `src/views/shop.ts` | Obchod: „1 balíček“ vede na regál, „10 balíčků“ a „Booster box (36)“ přidají balíčky naslepo; okno „Šance a zdroje“. |
 | `src/views/pick.ts` | Regál: 10 předem vylosovaných balíčků (uložené ve `state.shelf`, obnovení stránky je nepřelosuje). Vzatý balíček jde do `sealed` a jeho místo zaplní nový. Balíček s IR/UR a vzácnější kartou má **tajnou jiskřičku** (`hintLevel` 1–3). |
@@ -42,7 +44,7 @@ Každá obrazovka se kreslí do nového kontejneru (pomalé načítání staré 
 | `src/ui/pack.ts` | 3D model balíčku (`packEl`), ID produktů TCGplayer (`PACK_PRODUCTS`) a URL fotek, jiskřička náznaku. |
 | `src/ui/holo.ts` | 2D karta s holo vrstvami (`cardEl`), naklánění kurzorem/gyroskopem (`enableTilt`), rub karty (`cardBack`, oficiální obrázek + náhradní design), `preload`. |
 | `src/ui/card3d.ts` | 3D model karty (líc, rub, hrany) a prohlížeč s tažením, setrvačností, otočením a gyroskopem. |
-| `public/sw.js` | Service worker: app shell a data offline (data network-first), obrázky karet/obalů/rubu cache-first přes CORS (opaque odpovědi se neukládají kvůli kvótě). Při změně cachovaných cest zvyš `VERSION`. |
+| `public/sw.js` | Service worker: app shell, soubory buildu a data offline (data network-first), obrázky cache-first přes CORS (opaque odpovědi se neukládají kvůli kvótě). Malé obrázky v `card-images` (limit 2000), velké (`_hires`, `/large`, `_in_1000x1000`) v `card-images-large` (limit 150). Řádek `const BUILD = …` při buildu přepíše plugin ve `vite.config.ts` (verze = hash sw.js + názvů souborů), takže se verze mění sama a stará mezipaměť se smaže. `main.ts` pak nabídne „Nová verze – Obnovit“. |
 
 ## Data a externí zdroje (co je ověřené)
 

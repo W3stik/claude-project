@@ -4,12 +4,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseTcgdexPricing } from "../src/tcgdexPricing.js";
 
 const API = "https://api.tcgdex.net/v2/en";
 const DATA = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "data");
 const CONCURRENCY = 8;
-
-const num = (v) => (typeof v === "number" && v > 0 ? Math.round(v * 100) / 100 : undefined);
 
 async function getJson(url, tries = 3) {
   for (let i = 1; ; i++) {
@@ -22,20 +21,6 @@ async function getJson(url, tries = 3) {
       await new Promise((r) => setTimeout(r, 500 * i));
     }
   }
-}
-
-/** Stejný výklad cen jako v aplikaci (src/prices.ts). */
-function parse(pricing) {
-  const cm = pricing?.cardmarket ?? {};
-  const tp = pricing?.tcgplayer ?? {};
-  const market = (k) => num(tp[k]?.marketPrice) ?? num(tp[k]?.midPrice);
-  const out = {
-    eur: num(cm.trend) ?? num(cm.avg) ?? num(cm["trend-holo"]) ?? num(cm["avg-holo"]),
-    eurReverse: num(cm["trend-holo"]) ?? num(cm["avg-holo"]),
-    usd: market("holofoil") ?? market("normal"),
-    usdReverse: market("reverse-holofoil"),
-  };
-  return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
 }
 
 async function pool(items, fn) {
@@ -70,7 +55,7 @@ for (const set of sets) {
 
   let priced = 0;
   wanted.forEach((c, i) => {
-    const price = parse(details[i]?.pricing);
+    const price = parseTcgdexPricing(details[i]?.pricing);
     if (Object.keys(price).length) {
       cards[byNumber.get(Number(c.localId))] = price;
       priced++;

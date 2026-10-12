@@ -1,7 +1,7 @@
 import { loadCards, loadPools, loadSets, setIdOfCard } from "../data";
 import { packProfile, rarityInfo, VARIANT_LABEL } from "../odds";
 import { fromSealed, hintLevel, openPack } from "../pack";
-import { type CardPrice, formatEur, formatUsd, loadSetPrices, variantPrice } from "../prices";
+import { addPrice, type CardPrice, formatEur, formatTotal, formatUsd, loadSetPrices, type PriceTotal, variantPrice } from "../prices";
 import { collectionKey, getState, nextSealed, recordOpening } from "../store";
 import type { Card, PulledCard, SetInfo } from "../types";
 import { animationEnd, append, clear, h, prefersReducedMotion, sleep } from "../ui/dom";
@@ -410,14 +410,9 @@ class OpeningStage {
 
     loadSetPrices(priceSetIds(cards)).then((loaded) => {
       prices = loaded;
-      let eur = 0;
-      let usd = 0;
-      for (const pulled of cards) {
-        const p = variantPrice(loaded[pulled.card.id], pulled.variant);
-        eur += p.eur ?? 0;
-        usd += p.usd ?? 0;
-      }
-      total.textContent = eur || usd ? `${formatEur(eur)} (Cardmarket) · ${formatUsd(usd)} (TCGplayer)` : "ceny nejsou dostupné";
+      const sum: PriceTotal = {};
+      for (const pulled of cards) addPrice(sum, variantPrice(loaded[pulled.card.id], pulled.variant));
+      total.textContent = formatTotal(sum, true);
       for (const { el, pulled } of priceEls) el.textContent = priceText(pulled);
     });
   }

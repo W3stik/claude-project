@@ -4,7 +4,9 @@ import { rarityInfo } from "../odds";
 import type { Card, Variant } from "../types";
 import { h } from "./dom";
 
-const tilted = new Set<HTMLElement>();
+// Slabé odkazy: karta odstraněná ze stránky se uvolní z paměti, i když
+// gyroskop nikdy nepošle událost (na počítači), která by seznam pročistila.
+const tilted = new Set<WeakRef<HTMLElement>>();
 let gyroListening = false;
 
 function setTilt(el: HTMLElement, x: number, y: number, active: boolean) {
@@ -23,11 +25,13 @@ function onOrientation(e: DeviceOrientationEvent) {
   // Telefon držený v ruce mívá beta kolem 40°, proto střed posuneme.
   const x = Math.min(1, Math.max(0, 0.5 + e.gamma / 50));
   const y = Math.min(1, Math.max(0, 0.5 + (e.beta - 40) / 50));
-  for (const el of tilted) {
-    if (!el.isConnected) {
-      tilted.delete(el);
+  for (const ref of tilted) {
+    const el = ref.deref();
+    if (!el) {
+      tilted.delete(ref);
       continue;
     }
+    if (!el.isConnected) continue;
     if (el.dataset.pointer === "1") continue;
     setTilt(el, x, y, true);
   }
@@ -46,7 +50,8 @@ function listenGyro() {
 export function enableTilt(el: HTMLElement, { gyro = true }: { gyro?: boolean } = {}) {
   setTilt(el, 0.5, 0.5, false);
   if (gyro) {
-    tilted.add(el);
+    for (const ref of tilted) if (!ref.deref()) tilted.delete(ref);
+    tilted.add(new WeakRef(el));
     listenGyro();
   }
 

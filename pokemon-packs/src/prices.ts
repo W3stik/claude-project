@@ -4,6 +4,7 @@
 //  2. Pokémon TCG API (api.pokemontcg.io) pro sady, které v souboru chybí.
 //  3. TCGdex (api.tcgdex.net) živě pro jednu kartu v jejím detailu.
 // Živé ceny se ukládají do prohlížeče a obnovují se po 12 hodinách.
+import { parseTcgdexPricing } from "./tcgdexPricing.js";
 import type { Card, Variant } from "./types";
 
 export interface CardPrice {
@@ -169,25 +170,6 @@ async function getJson<T>(url: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-interface TcgdexPricing {
-  cardmarket?: Record<string, unknown>;
-  tcgplayer?: Record<string, Record<string, unknown> | unknown>;
-}
-
-function fromTcgdex(pricing: TcgdexPricing): CardPrice {
-  const cm = pricing.cardmarket ?? {};
-  const tp = (pricing.tcgplayer ?? {}) as Record<string, Record<string, unknown>>;
-  const market = (k: string) => num(tp[k]?.marketPrice) ?? num(tp[k]?.midPrice);
-  return {
-    eur: num(cm.trend) ?? num(cm.avg) ?? num(cm["trend-holo"]) ?? num(cm["avg-holo"]),
-    eurReverse: num(cm["trend-holo"]) ?? num(cm["avg-holo"]),
-    usd: market("holofoil") ?? market("normal"),
-    usdReverse: market("reverse-holofoil") ?? market("reverseHolofoil"),
-    source: "tcgdex",
-    updated: typeof cm.updated === "string" ? cm.updated : undefined,
-  };
-}
-
 /** Dohledá cenu jedné karty v TCGdex podle názvu sady a čísla (nebo jména u podsad). */
 export async function tcgdexPrice(card: Card, setName: string): Promise<CardPrice | undefined> {
   try {
@@ -209,8 +191,10 @@ export async function tcgdexPrice(card: Card, setName: string): Promise<CardPric
       : (await cards).find((c) => Number(c.localId) === card.number);
     if (!match) return undefined;
 
-    const full = await getJson<{ pricing?: TcgdexPricing }>(`${TCGDEX}/cards/${match.id}`);
-    return full.pricing ? fromTcgdex(full.pricing) : undefined;
+    const full = await getJson<{ pricing?: { cardmarket?: { updated?: unknown } } }>(`${TCGDEX}/cards/${match.id}`);
+    if (!full.pricing) return undefined;
+    const updated = full.pricing.cardmarket?.updated;
+    return { ...parseTcgdexPricing(full.pricing), source: "tcgdex", updated: typeof updated === "string" ? updated : undefined };
   } catch {
     tcgdexSets = null;
     return undefined;
@@ -222,6 +206,24 @@ const usdFmt = new Intl.NumberFormat("cs-CZ", { style: "currency", currency: "US
 
 export const formatEur = (v: number | undefined) => (v === undefined ? "–" : eurFmt.format(v));
 export const formatUsd = (v: number | undefined) => (v === undefined ? "–" : usdFmt.format(v));
+
+/** Součet cen. Měna, ve které žádná karta cenu nemá, zůstane prázdná (nezobrazí se jako 0). */
+export interface PriceTotal {
+  eur?: number;
+  usd?: number;
+}
+
+export function addPrice(total: PriceTotal, price: { eur?: number; usd?: number }, count = 1) {
+  if (price.eur !== undefined) total.eur = (total.eur ?? 0) + price.eur * count;
+  if (price.usd !== undefined) total.usd = (total.usd ?? 0) + price.usd * count;
+}
+
+export function formatTotal(total: PriceTotal, withSource = false): string {
+  const parts: string[] = [];
+  if (total.eur !== undefined) parts.push(`${formatEur(total.eur)}${withSource ? " (Cardmarket)" : ""}`);
+  if (total.usd !== undefined) parts.push(`${formatUsd(total.usd)}${withSource ? " (TCGplayer)" : ""}`);
+  return parts.length ? parts.join(" · ") : "ceny nejsou dostupné";
+}
 
 /** Hodnota pro řazení: přednostně EUR (Cardmarket), jinak USD. */
 export const sortValue = (p: { eur?: number; usd?: number }) => p.eur ?? p.usd ?? -1;

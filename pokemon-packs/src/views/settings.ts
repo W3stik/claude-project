@@ -1,5 +1,9 @@
-import { exportState, importState, resetState } from "../store";
+import { isPersisted, lastBackup, markBackup } from "../storage";
+import { exportState, importState, parseBackup, resetState, stateSummary } from "../store";
 import { h, toast } from "../ui/dom";
+
+const dateFmt = new Intl.DateTimeFormat("cs-CZ", { dateStyle: "medium" });
+const kusu = (n: number) => `${n} ${n === 1 ? "kus" : n >= 2 && n <= 4 ? "kusy" : "kusů"}`;
 
 function download(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
@@ -16,16 +20,40 @@ export function renderSettings(root: HTMLElement) {
     accept: "application/json,.json",
     class: "hidden",
     onchange: async (e: Event) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
+      const input = e.target as HTMLInputElement;
+      const file = input.files?.[0];
+      // Stejný soubor půjde vybrat znovu.
+      input.value = "";
       if (!file) return;
       try {
-        importState(await file.text());
+        const backup = parseBackup(await file.text());
+        const next = stateSummary(backup);
+        const now = stateSummary();
+        const question =
+          `Záloha obsahuje ${kusu(next.cards)} karet a ${next.packs} neotevřených balíčků.
+` +
+          `Nahradit jí současnou sbírku (${kusu(now.cards)} karet, ${now.packs} balíčků)? Současná sbírka se ztratí.`;
+        if (now.cards + now.packs > 0 && !confirm(question)) return;
+        importState(backup);
         toast("Sbírka obnovena ze zálohy");
+        refreshStatus();
       } catch (err) {
         toast(err instanceof Error ? err.message : "Zálohu se nepodařilo načíst");
       }
     },
   });
+
+  const status = h("p", { class: "muted small" });
+  const refreshStatus = async () => {
+    const at = lastBackup();
+    const persisted = await isPersisted();
+    status.textContent =
+      `Poslední záloha: ${at ? dateFmt.format(at) : "zatím žádná"}. ` +
+      (persisted
+        ? "Úložiště je trvalé, prohlížeč ho sám nesmaže."
+        : "Úložiště není trvalé: při nedostatku místa ho prohlížeč může smazat, proto si sbírku zálohuj.");
+  };
+  refreshStatus();
 
   root.append(
     h("section", { class: "view-head" }, h("h1", null, "Více")),
@@ -43,7 +71,14 @@ export function renderSettings(root: HTMLElement) {
         { class: "row" },
         h(
           "button",
-          { class: "btn", onclick: () => download(`booster-lab-${new Date().toISOString().slice(0, 10)}.json`, exportState()) },
+          {
+            class: "btn",
+            onclick: () => {
+              download(`booster-lab-${new Date().toISOString().slice(0, 10)}.json`, exportState());
+              markBackup();
+              refreshStatus();
+            },
+          },
           "Stáhnout zálohu",
         ),
         h("button", { class: "btn", onclick: () => fileInput.click() }, "Nahrát zálohu"),
@@ -62,6 +97,7 @@ export function renderSettings(root: HTMLElement) {
           "Smazat sbírku",
         ),
       ),
+      status,
     ),
     h(
       "section",
@@ -81,10 +117,10 @@ export function renderSettings(root: HTMLElement) {
           "li",
           null,
           "Ceny: ",
-          h("a", { href: "https://pokemontcg.io", target: "_blank", rel: "noopener" }, "Pokémon TCG API"),
-          " (Cardmarket v EUR a TCGplayer v USD), záložně ",
           h("a", { href: "https://tcgdex.dev", target: "_blank", rel: "noopener" }, "TCGdex"),
-          ". Ukládají se na 12 hodin.",
+          " (Cardmarket v EUR a TCGplayer v USD), přibalené k aplikaci a obnovované každý den. Sady, které tam chybí, se doplní živě z ",
+          h("a", { href: "https://pokemontcg.io", target: "_blank", rel: "noopener" }, "Pokémon TCG API"),
+          " (ukládají se na 12 hodin); detail karty zkouší i aktuální cenu z TCGdex.",
         ),
         h(
           "li",
