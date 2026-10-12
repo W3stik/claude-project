@@ -1,0 +1,20 @@
+{
+  "name": "pokemon-packs",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fanouškovský simulátor otevírání balíčků Pokémon TCG (PWA)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "data": "node scripts/fetch-data.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4"
+  }
+}

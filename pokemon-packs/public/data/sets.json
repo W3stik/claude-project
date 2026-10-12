@@ -1,0 +1,112 @@
+[
+ {
+  "id": "me55",
+  "name": "30th Celebration",
+  "series": "Mega Evolution",
+  "code": "30C",
+  "releaseDate": "2026-09-16",
+  "printedTotal": 128,
+  "total": 188,
+  "logo": "https://images.scrydex.com/pokemon/me55-logo/logo",
+  "symbol": "https://images.scrydex.com/pokemon/me55-symbol/symbol"
+ },
+ {
+  "id": "me5",
+  "name": "Pitch Black",
+  "series": "Mega Evolution",
+  "code": "PBL",
+  "releaseDate": "2026-07-17",
+  "printedTotal": 84,
+  "total": 120,
+  "logo": "https://images.scrydex.com/pokemon/me5-logo/logo",
+  "symbol": "https://images.scrydex.com/pokemon/me5-symbol/symbol"
+ },
+ {
+  "id": "me4",
+  "name": "Chaos Rising",
+  "series": "Mega Evolution",
+  "code": "CRI",
+  "releaseDate": "2026-05-22",
+  "printedTotal": 86,
+  "total": 122,
+  "logo": "https://images.scrydex.com/pokemon/me4-logo/logo",
+  "symbol": "https://images.scrydex.com/pokemon/me4-symbol/symbol"
+ },
+ {
+  "id": "me3",
+  "name": "Perfect Order",
+  "series": "Mega Evolution",
+  "code": "POR",
+  "releaseDate": "2026-03-27",
+  "printedTotal": 88,
+  "total": 124,
+  "logo": "https://images.scrydex.com/pokemon/me3-logo/logo",
+  "symbol": "https://images.scrydex.com/pokemon/me3-symbol/symbol"
+ },
+ {
+  "id": "me2pt5",
+  "name": "Ascended Heroes",
+  "series": "Mega Evolution",
+  "code": "ASC",
+  "releaseDate": "2026-01-30",
+  "printedTotal": 217,
+  "total": 295,
+  "logo": "https://images.scrydex.com/pokemon/me2pt5-logo/logo",
+  "symbol": "https://images.scrydex.com/pokemon/me2pt5-symbol/symbol"
+ },
+ {
+  "id": "me2",
+  "name": "Phantasmal Flames",
+  "series": "Mega Evolution",
+  "code": "PFL",
+  "releaseDate": "2025-11-14",
+  "printedTotal": 94,
+  "total": 130,
+  "logo": "https://images.pokemontcg.io/me2/logo.png",
+  "symbol": "https://images.pokemontcg.io/me2/symbol.png"
+ },
+ {
+  "id": "me1",
+  "name": "Mega Evolution",
+  "series": "Mega Evolution",
+  "code": "MEG",
+  "releaseDate": "2025-09-26",
+  "printedTotal": 132,
+  "total": 188,
+  "logo": "https://images.pokemontcg.io/me1/logo.png",
+  "symbol": "https://images.pokemontcg.io/me1/symbol.png"
+ },
+ {
+  "id": "zsv10pt5",
+  "name": "Black Bolt",
+  "series": "Scarlet & Violet",
+  "code": "BLK",
+  "releaseDate": "2025-07-18",
+  "printedTotal": 86,
+  "total": 172,
+  "logo": "https://images.pokemontcg.io/zsv10pt5/logo.png",
+  "symbol": "https://images.pokemontcg.io/zsv10pt5/symbol.png"
+ },
+ {
+  "id": "rsv10pt5",
+  "name": "White Flare",
+  "series": "Scarlet & Violet",
+  "code": "WHT",
+  "releaseDate": "2025-07-18",
+  "printedTotal": 86,
+  "total": 173,
+  "logo": "https://images.pokemontcg.io/rsv10pt5/logo.png",
+  "symbol": "https://images.pokemontcg.io/rsv10pt5/symbol.png"
+ },
+ {
+  "id": "sv10",
+  "name": "Destined Rivals",
+  "series": "Scarlet & Violet",
+  "code": "DRI",
+  "releaseDate": "2025-05-30",
+  "printedTotal": 182,
+  "total": 244,
+  "logo": "https://images.pokemontcg.io/sv10/logo.png",
+  "symbol": "https://images.pokemontcg.io/sv10/symbol.png"
+ }
+]
