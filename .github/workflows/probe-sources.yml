@@ -4,6 +4,7 @@ on:
     paths:
       - ".github/workflows/probe-sources.yml"
       - "pokemon-packs/scripts/probe-sources.mjs"
+      - "pokemon-packs/scripts/fetch-prices.mjs"
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -12,4 +13,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node pokemon-packs/scripts/probe-sources.mjs
+      - run: npm install --no-save sharp@0.34.4
+        working-directory: pokemon-packs
+      - run: node scripts/probe-sources.mjs
+        working-directory: pokemon-packs
+      - run: node scripts/fetch-prices.mjs && head -c 600 public/data/prices.json
+        working-directory: pokemon-packs
