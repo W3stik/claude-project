@@ -1,10 +1,16 @@
 // Service worker: aplikace a data karet fungují i offline, obrázky karet
 // se po prvním zobrazení ukládají do mezipaměti.
-const VERSION = "v1";
+const VERSION = "v2";
 const APP_CACHE = `app-${VERSION}`;
 const IMG_CACHE = "card-images";
 const IMG_LIMIT = 2500;
-const IMAGE_HOSTS = ["images.pokemontcg.io", "images.scrydex.com", "assets.tcgdex.net"];
+const IMAGE_HOSTS = [
+  "images.pokemontcg.io",
+  "images.scrydex.com",
+  "assets.tcgdex.net",
+  "tcgplayer-cdn.tcgplayer.com",
+  "tcg.pokemon.com",
+];
 
 const scope = new URL(self.registration.scope);
 const local = (path) => new URL(path, scope).href;

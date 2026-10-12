@@ -8,6 +8,9 @@ on:
   pull_request:
     paths:
       - "pokemon-packs/**"
+  # Každý den ráno znovu nasadí aplikaci s čerstvými cenami karet.
+  schedule:
+    - cron: "17 5 * * *"
   workflow_dispatch:
 
 permissions:
@@ -28,16 +31,19 @@ jobs:
           cache-dependency-path: pokemon-packs/package-lock.json
       - run: npm ci
       - run: npm test
+      # Ceny z TCGdex se přibalí k aplikaci; když služba neodpoví, build pokračuje bez nich.
+      - run: npm run prices
+        continue-on-error: true
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: pokemon-packs/dist
 
-  # Nasazení na GitHub Pages: jen z výchozí větve nebo ručním spuštěním.
+  # Nasazení na GitHub Pages: z výchozí větve, denně (čerstvé ceny) nebo ručně.
   # V nastavení repozitáře musí být Settings → Pages → Source: GitHub Actions.
   deploy:
     needs: build
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-latest
     permissions:
       pages: write

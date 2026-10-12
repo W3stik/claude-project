@@ -497,69 +497,197 @@ img {
   font-size: 0.9rem;
 }
 
-/* --- Balíček -------------------------------------------------------------- */
+/* --- Balíček (3D) --------------------------------------------------------- */
 
-.pack {
+.pack3d {
+  --depth: 6px;
+  --ratio: 0.55;
+  --spin: 0deg;
   position: relative;
   width: 100%;
-  aspect-ratio: 0.58;
+  aspect-ratio: var(--ratio);
+  perspective: 900px;
   user-select: none;
-  filter: drop-shadow(0 10px 18px rgb(0 0 0 / 0.45));
+  -webkit-user-select: none;
 }
 
-.pack__top {
-  position: relative;
-  height: 9%;
-  border-radius: 6px 6px 0 0;
-  background: linear-gradient(90deg, var(--c1), var(--c2));
-  overflow: hidden;
-}
-
-.pack__crimp {
+.pack3d__tilt {
   position: absolute;
   inset: 0;
-  background: repeating-linear-gradient(90deg, rgb(255 255 255 / 0.35) 0 2px, rgb(0 0 0 / 0.28) 2px 4px);
+  transform-style: preserve-3d;
+  transform: rotateX(calc(var(--rx, 0deg) * 1.3)) rotateY(calc(var(--ry, 0deg) * 1.6 + var(--spin)));
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.2);
 }
 
-.pack__crimp--bottom {
-  inset: auto 0 0;
-  height: 8%;
+.pack3d.is-dragging .pack3d__tilt {
+  transition: transform 0.05s linear;
 }
 
-.pack__main {
-  position: relative;
-  display: flex;
+.pack3d__body {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+.pack3d--idle .pack3d__body {
+  animation: pack-sway 5s ease-in-out infinite;
+}
+
+.pack3d.is-dragging .pack3d__body {
+  animation-play-state: paused;
+}
+
+@keyframes pack-sway {
+  0%,
+  100% {
+    transform: translateY(0) rotateY(-14deg) rotateX(4deg);
+  }
+  50% {
+    transform: translateY(-10px) rotateY(14deg) rotateX(-3deg);
+  }
+}
+
+/* Odtrhávací pruh a zbytek obalu: obě části pokrývají celý balíček, každá
+   ukazuje jen svůj výřez (clip-path), takže se při roztržení oddělí. */
+.pack3d__piece {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+.pack3d__face {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  backface-visibility: hidden;
+  background:
+    var(--art, none) center / 100% 100% no-repeat,
+    radial-gradient(120% 60% at 50% 20%, rgb(255 255 255 / 0.18), transparent 60%),
+    linear-gradient(160deg, var(--c1), var(--c2));
+}
+
+.pack3d__face--front {
+  transform: translateZ(calc(var(--depth) / 2));
+}
+
+.pack3d__face--back {
+  transform: rotateY(180deg) translateZ(calc(var(--depth) / 2));
+  filter: brightness(0.5) saturate(0.7);
+}
+
+.pack3d__face--back::after {
+  /* zadní strana: svislý lepený šev uprostřed */
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 44%;
+  width: 12%;
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.35), rgb(255 255 255 / 0.15), rgb(0 0 0 / 0.35));
+}
+
+.pack3d__piece--top .pack3d__face {
+  clip-path: inset(0 0 91% 0);
+}
+
+.pack3d__piece--main .pack3d__face {
+  clip-path: inset(9% 0 0 0);
+}
+
+/* Lesk fólie: posouvá se podle náklonu. */
+.pack3d__face--front::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.35) 45%,
+    rgb(255 255 255 / 0.08) 52%,
+    transparent 65%
+  );
+  background-size: 250% 250%;
+  background-position: calc(100% - var(--mx, 50%)) 50%;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.pack3d--idle .pack3d__face--front::after {
+  animation: foil-sweep 5s ease-in-out infinite;
+}
+
+@keyframes foil-sweep {
+  0%,
+  100% {
+    background-position: 100% 50%;
+  }
+  50% {
+    background-position: 0% 50%;
+  }
+}
+
+.pack3d__side {
+  position: absolute;
+  top: 9%;
+  bottom: 0;
+  width: var(--depth);
+  background: linear-gradient(180deg, var(--c2), var(--c1));
+  filter: brightness(0.75);
+}
+
+.pack3d__side--left {
+  left: 0;
+  transform: translateX(calc(var(--depth) / -2)) rotateY(-90deg);
+}
+
+.pack3d__side--right {
+  right: 0;
+  transform: translateX(calc(var(--depth) / 2)) rotateY(90deg);
+}
+
+.pack3d__fallback {
+  position: absolute;
+  inset: 0;
+  display: none;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8%;
-  height: 91%;
-  padding: 10% 8% 14%;
-  border-radius: 0 0 6px 6px;
-  background:
-    radial-gradient(120% 60% at 50% 20%, rgb(255 255 255 / 0.18), transparent 60%),
-    linear-gradient(160deg, var(--c1), var(--c2));
-  overflow: hidden;
+  padding: 14% 8%;
 }
 
-.pack__main::after {
-  /* kovový lesk fólie */
-  content: "";
+.pack3d--noart .pack3d__fallback {
+  display: flex;
+}
+
+.pack3d--noart .pack3d__face {
+  background:
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.3) 0 2px, rgb(0 0 0 / 0.25) 2px 4px) top / 100% 9% no-repeat,
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.3) 0 2px, rgb(0 0 0 / 0.25) 2px 4px) bottom / 100% 6% no-repeat,
+    radial-gradient(120% 60% at 50% 20%, rgb(255 255 255 / 0.18), transparent 60%),
+    linear-gradient(160deg, var(--c1), var(--c2));
+}
+
+.pack3d__shadow {
   position: absolute;
-  inset: -50%;
-  background: linear-gradient(115deg, transparent 40%, rgb(255 255 255 / 0.28) 50%, transparent 60%);
-  animation: foil 4.5s ease-in-out infinite;
+  left: 12%;
+  right: 12%;
+  bottom: -9%;
+  height: 7%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.55), transparent);
   pointer-events: none;
 }
 
-@keyframes foil {
-  0%,
-  20% {
-    transform: translateX(-40%);
-  }
-  60%,
-  100% {
-    transform: translateX(40%);
+.pack3d--idle .pack3d__shadow {
+  animation: shadow-sway 5s ease-in-out infinite;
+}
+
+@keyframes shadow-sway {
+  50% {
+    transform: scale(0.85);
+    opacity: 0.7;
   }
 }
 
@@ -592,68 +720,79 @@ img {
   white-space: nowrap;
 }
 
-.shop-tile .pack,
-.inventory .pack {
+.shop-tile .pack3d,
+.inventory .pack3d {
   font-size: 13px;
 }
 
 .pack-wrap {
   display: grid;
   place-items: center;
-  padding: 8px 0 4px;
+  padding: 16px 0 24px;
 }
 
-.pack--big {
-  width: min(62vw, 260px);
+.pack3d--big {
+  --depth: 14px;
+  width: min(60vw, 270px);
   font-size: 18px;
   cursor: grab;
   touch-action: none;
 }
 
-.pack--idle {
-  animation: float 3.2s ease-in-out infinite;
+.pack3d--big.is-dragging {
+  cursor: grabbing;
 }
 
-@keyframes float {
-  50% {
-    transform: translateY(-8px) rotate(-1deg);
-  }
-}
-
-.pack__cut {
+/* Řez při tažení prstem přes horní pruh */
+.pack3d__cut {
   position: absolute;
   top: 9%;
   left: 0;
   width: calc(var(--cut, 0) * 100%);
   height: 3px;
+  margin-top: -1px;
   background: #fff;
   box-shadow: 0 0 12px 3px #fff;
   border-radius: 2px;
+  transform: translateZ(calc(var(--depth) / 2 + 1px));
   pointer-events: none;
 }
 
-.pack--torn .pack__cut {
+.pack3d--torn .pack3d__cut {
   display: none;
 }
 
-.pack--torn .pack__top {
-  animation: tear-top 0.6s ease-in forwards;
+.pack3d--torn .pack3d__piece--top {
+  animation: tear-top-3d 0.75s cubic-bezier(0.3, 0.1, 0.6, 1) forwards;
 }
 
-.pack--torn .pack__main {
-  animation: pack-drop 0.7s 0.35s ease-in forwards;
+.pack3d--torn .pack3d__piece--main {
+  animation: pack-drop-3d 0.9s 0.4s cubic-bezier(0.5, 0, 0.8, 0.6) forwards;
 }
 
-@keyframes tear-top {
+.pack3d--torn .pack3d__shadow {
+  animation: fade-out 0.6s 0.4s forwards;
+}
+
+@keyframes tear-top-3d {
+  30% {
+    transform: translate3d(10px, -14px, 20px) rotateZ(6deg) rotateX(20deg);
+  }
   to {
-    transform: translate(60px, -90px) rotate(28deg);
+    transform: translate3d(120px, -160px, 140px) rotateZ(40deg) rotateX(70deg) rotateY(30deg);
     opacity: 0;
   }
 }
 
-@keyframes pack-drop {
+@keyframes pack-drop-3d {
   to {
-    transform: translateY(70%);
+    transform: translate3d(0, 75%, -160px) rotateX(-65deg);
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
     opacity: 0;
   }
 }
@@ -810,6 +949,19 @@ img {
   overflow: hidden;
 }
 
+.pback--photo {
+  border: 0;
+  background: #1d3c8f;
+}
+
+.pback__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
 .pback__ring {
   position: absolute;
   inset: 32%;
@@ -863,27 +1015,56 @@ img {
 
 .pile {
   position: relative;
-  width: min(70vw, 300px);
+  width: min(68vw, 300px);
   aspect-ratio: var(--card-ratio);
   margin-top: 8px;
+  perspective: 1100px;
   cursor: pointer;
   user-select: none;
-  animation: pile-in 0.5s ease-out;
+  -webkit-user-select: none;
+  touch-action: none;
 }
 
-@keyframes pile-in {
+.pile__stack {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(calc(var(--rx, 0deg) * 0.7)) rotateY(calc(var(--ry, 0deg) * 0.7));
+  transition: transform 0.3s ease-out;
+}
+
+/* Karty vyjedou z otevřeného balíčku jedna po druhé. */
+.pile__item {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: translateZ(var(--z)) rotateZ(var(--rot));
+  transition:
+    transform 0.55s cubic-bezier(0.25, 0.8, 0.3, 1),
+    opacity 0.55s;
+  animation: card-rise 0.7s calc(var(--i) * 45ms) cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+}
+
+@keyframes card-rise {
   from {
-    transform: translateY(40%) scale(0.8);
+    transform: translate3d(0, 55%, -220px) rotateX(40deg);
     opacity: 0;
   }
 }
 
-.pile__item {
-  position: absolute;
-  inset: 0;
-  transition:
-    transform 0.45s cubic-bezier(0.3, 0.7, 0.3, 1),
-    opacity 0.45s;
+.pile__item.is-current {
+  transform: translateZ(0) rotateZ(0);
+}
+
+.pile__item.is-dragging {
+  transition: none;
+}
+
+.pile__item.is-gone {
+  transform: translate3d(calc(var(--dir, -1) * 135%), -18%, 200px) rotateY(calc(var(--dir, -1) * 60deg))
+    rotateZ(calc(var(--dir, -1) * 24deg));
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Stín jen u horní karty, jinak se stíny deseti karet sčítají do tmavého rámu. */
@@ -892,15 +1073,9 @@ img {
   box-shadow: none;
 }
 
-.pile__item.is-gone {
-  transform: translate(-120%, -10%) rotate(-20deg);
-  opacity: 0;
-  pointer-events: none;
-}
-
 .pile__tag {
   position: absolute;
-  top: calc(100% + 10px);
+  top: calc(100% + 12px);
   left: 0;
   right: 0;
   display: none;
@@ -913,6 +1088,7 @@ img {
   display: flex;
 }
 
+/* Karta má líc, rub a mezi nimi tenké jádro, takže při otáčení je vidět hrana. */
 .flip {
   position: relative;
   width: 100%;
@@ -928,12 +1104,39 @@ img {
   backface-visibility: hidden;
 }
 
+.flip__front {
+  transform: translateZ(1px);
+}
+
 .flip__back {
-  transform: rotateY(180deg);
+  transform: rotateY(180deg) translateZ(1px);
+}
+
+.flip__core {
+  position: absolute;
+  inset: 0.5%;
+  border-radius: 4.6% / 3.3%;
+  background: #d9dde6;
 }
 
 .is-down .flip {
   transform: rotateY(180deg);
+}
+
+.is-flipping .flip {
+  animation: flip-lift 0.75s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes flip-lift {
+  0% {
+    transform: translateZ(0) rotateY(180deg);
+  }
+  45% {
+    transform: translateZ(110px) rotateX(8deg) rotateY(95deg);
+  }
+  100% {
+    transform: translateZ(0) rotateY(0deg);
+  }
 }
 
 .is-charging .flip {
@@ -950,13 +1153,13 @@ img {
 @keyframes charge {
   0%,
   100% {
-    transform: rotateY(180deg) translateX(0);
+    transform: translateZ(20px) rotateY(180deg);
   }
   25% {
-    transform: rotateY(180deg) translateX(-3px) rotate(-1deg);
+    transform: translate3d(-3px, 0, 20px) rotate(-1deg) rotateY(180deg);
   }
   75% {
-    transform: rotateY(180deg) translateX(3px) rotate(1deg);
+    transform: translate3d(3px, 0, 20px) rotate(1deg) rotateY(180deg);
   }
 }
 
@@ -1281,7 +1484,7 @@ img {
     width: 88px;
   }
 
-  .shop-tile .pack {
+  .shop-tile .pack3d {
     font-size: 10px;
   }
 

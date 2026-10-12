@@ -95,14 +95,15 @@ export function openCardModal(card: Card, set: SetInfo) {
   );
   openModal(content, "modal__box--card");
 
+  // Nejdřív ukážeme uložené ceny, pak je zkusíme nahradit živými z TCGdex.
   loadSetPrices([setIdOfCard(card.id)])
     .then(async (prices) => {
-      let price = prices[card.id];
-      if (!price || (price.eur === undefined && price.usd === undefined)) {
-        const subsetName = card.prefix ? `${set.name}: ${card.rarity}` : set.name;
-        price = (await tcgdexPrice(card, subsetName)) ?? price;
-      }
-      priceSlot.replaceChildren(priceBlock(price));
+      const stored = prices[card.id];
+      if (stored) priceSlot.replaceChildren(priceBlock(stored));
+      const subsetName = card.prefix ? `${set.name}: ${card.rarity}` : set.name;
+      const live = await tcgdexPrice(card, subsetName);
+      const hasValue = (p?: CardPrice) => p && (p.eur !== undefined || p.usd !== undefined);
+      priceSlot.replaceChildren(priceBlock(hasValue(live) ? { ...stored, ...live } : stored));
     })
     .catch(() => priceSlot.replaceChildren(priceBlock(undefined)));
 }

@@ -92,14 +92,20 @@ export function cardEl(card: Card, variant: Variant, opts: CardElOptions = {}): 
   return el;
 }
 
-/** Rub karty (vlastní design, ne oficiální). */
+/** Oficiální rub karty Pokémon TCG (načítá se z tcg.pokemon.com). */
+export const CARD_BACK_URL = "https://tcg.pokemon.com/assets/img/global/tcg-card-back-2x.jpg";
+
+/** Rub karty: oficiální obrázek, a když se nenačte, vlastní náhradní design. */
 export function cardBack(): HTMLElement {
-  return h(
-    "div",
-    { class: "pback" },
-    h("div", { class: "pback__ring" }),
-    h("div", { class: "pback__label" }, "BOOSTER LAB"),
-  );
+  const back = h("div", { class: "pback pback--photo" });
+  const img = h("img", { class: "pback__img", src: CARD_BACK_URL, alt: "", draggable: "false" });
+  img.addEventListener("error", () => {
+    img.remove();
+    back.classList.remove("pback--photo");
+    back.append(h("div", { class: "pback__ring" }), h("div", { class: "pback__label" }, "BOOSTER LAB"));
+  });
+  back.append(img);
+  return back;
 }
 
 /** Načte obrázky dopředu, aby se při odhalování neobjevovaly postupně. */

@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "data": "node scripts/fetch-data.mjs"
+    "data": "node scripts/fetch-data.mjs",
+    "prices": "node scripts/fetch-prices.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

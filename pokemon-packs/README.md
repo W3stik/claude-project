@@ -7,9 +7,14 @@ a karty Pokémon TCG, šance na tah podle reálných měření a tržní ceny ka
 
 - **Obchod**: posledních 10 vydaných sad. Balíčky jsou zdarma po jednom, po deseti nebo jako booster box (36).
   U každé sady je tabulka **šancí na tah** se složením balíčku a odkazy na zdroje.
-- **Otevírání**: balíček roztrhneš tažením prstu přes horní okraj (nebo klepnutím). Karty se odkrývají
-  postupně, poslední tři lícem dolů. Vzácná karta se před otočením rozzáří barvou rarity a vybuchne
-  částicemi, u SIR a zlatých karet navíc problikne obrazovka. Jde i otevřít bez animace nebo všechny balíčky naráz.
+- **Skutečné obaly a rub karet**: fotky booster packů každé sady (katalog TCGplayer) a oficiální rub
+  karty Pokémon TCG. Když se obrázek nenačte, použije se náhradní potisk.
+- **Otevírání ve 3D**: balíček má přední a zadní stranu i boky, pohupuje se a naklání podle prstu, myši
+  nebo náklonu telefonu; tažením ho jde otočit. Roztrhneš ho tažením přes horní okraj (nebo klepnutím),
+  horní pruh odletí a karty vyjedou z balíčku jako 3D balík. Kartu odhodíš klepnutím nebo tažením do strany.
+  Poslední tři karty jsou lícem dolů a otáčejí se ve 3D; vzácná karta se předtím rozzáří barvou rarity
+  a vybuchne částicemi, u SIR a zlatých karet navíc problikne obrazovka. Jde i otevřít bez animace
+  nebo všechny balíčky naráz.
 - **Holo efekty**: lesk podle rarity (holo, duhový, zlatý, Black White) a reverse holo včetně vzorů
   Poké Ball / Master Ball. Reaguje na myš, prst i náklon telefonu.
 - **Album**: přehled všech sad s procentem kompletnosti. Album sady zobrazuje všechny karty
@@ -49,7 +54,9 @@ případně ji spustíš ručně (Actions → pokemon-packs → Run workflow).
 |---|---|---|
 | Sady a karty | [PokemonTCG/pokemon-tcg-data](https://github.com/PokemonTCG/pokemon-tcg-data) (stejná data jako Pokémon TCG API) | při spuštění `npm run data` |
 | Obrázky karet | CDN Pokémon TCG API / Scrydex | načítají se za běhu |
-| Ceny | [Pokémon TCG API](https://pokemontcg.io) (Cardmarket + TCGplayer), záložně [TCGdex](https://tcgdex.dev) | za běhu, ukládají se na 12 h |
+| Fotky obalů | CDN TCGplayer (ID produktů „Booster Pack“ v `src/ui/pack.ts`, z exportu katalogu na [tcgcsv.com](https://tcgcsv.com)) | načítají se za běhu |
+| Rub karty | tcg.pokemon.com | načítá se za běhu |
+| Ceny | [TCGdex](https://tcgdex.dev) (Cardmarket + TCGplayer) přibalené při buildu (`npm run prices`, CI denně); chybějící sady živě z [Pokémon TCG API](https://pokemontcg.io), v detailu karty živě z TCGdex | build + za běhu (12 h cache) |
 | Šance na tah | TCGplayer Authentication Center a komunitní statistiky, viz `src/odds.ts` | ručně |
 
 `npm run data` stáhne 10 nejnovějších sad (počet jde změnit: `npm run data -- 15`). Podsada

@@ -73,7 +73,7 @@ function setTile(set: SetInfo): HTMLElement {
   return h(
     "article",
     { class: "shop-tile" },
-    h("div", { class: "shop-tile__pack" }, packEl(set)),
+    h("div", { class: "shop-tile__pack" }, packEl(set, { tilt: true })),
     h(
       "div",
       { class: "shop-tile__body" },

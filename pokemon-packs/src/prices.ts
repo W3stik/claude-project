@@ -1,7 +1,9 @@
-// Reálné tržní ceny karet. Hlavní zdroj je Pokémon TCG API (api.pokemontcg.io),
-// které vrací ceny z TCGplayer (USD) i Cardmarket (EUR) pro celou sadu najednou.
-// Když pro kartu nic nevrátí, zkusí se TCGdex (api.tcgdex.net) jen pro tu kartu.
-// Ceny se ukládají do prohlížeče a obnovují se po 12 hodinách.
+// Reálné tržní ceny karet (Cardmarket v EUR, TCGplayer v USD).
+//  1. data/prices.json: ceny z TCGdex stažené při buildu (scripts/fetch-prices.mjs),
+//     takže jsou k dispozici hned a i offline.
+//  2. Pokémon TCG API (api.pokemontcg.io) pro sady, které v souboru chybí.
+//  3. TCGdex (api.tcgdex.net) živě pro jednu kartu v jejím detailu.
+// Živé ceny se ukládají do prohlížeče a obnovují se po 12 hodinách.
 import type { Card, Variant } from "./types";
 
 export interface CardPrice {
@@ -76,7 +78,12 @@ async function fetchSet(setId: string): Promise<PriceMap> {
   const out: PriceMap = {};
   for (let page = 1; page < 10; page++) {
     const url = `${API}?q=set.id:${setId}&select=id,tcgplayer,cardmarket&pageSize=250&page=${page}`;
-    const res = await fetch(url);
+    // API občas vrátí chybu 500, proto to zkusíme víckrát.
+    let res = await fetch(url);
+    for (let attempt = 1; !res.ok && res.status >= 500 && attempt < 3; attempt++) {
+      await new Promise((r) => setTimeout(r, 800 * attempt));
+      res = await fetch(url);
+    }
     if (!res.ok) throw new Error(`Ceny: HTTP ${res.status}`);
     const body = (await res.json()) as { data: ApiCard[]; totalCount: number };
     for (const card of body.data) out[card.id] = fromApiCard(card);
@@ -85,12 +92,39 @@ async function fetchSet(setId: string): Promise<PriceMap> {
   return out;
 }
 
+interface BundledFile {
+  updated: string;
+  cards: Record<string, Omit<CardPrice, "source">>;
+}
+
+let bundled: Promise<Map<string, PriceMap>> | null = null;
+
+/** Ceny přibalené k aplikaci, rozdělené podle sady. */
+function loadBundled(): Promise<Map<string, PriceMap>> {
+  bundled ??= fetch(`${import.meta.env.BASE_URL}data/prices.json`)
+    .then((res) => (res.ok ? (res.json() as Promise<BundledFile>) : null))
+    .then((file) => {
+      const bySet = new Map<string, PriceMap>();
+      if (!file) return bySet;
+      for (const [id, price] of Object.entries(file.cards)) {
+        const setId = id.slice(0, id.lastIndexOf("-"));
+        const map = bySet.get(setId) ?? {};
+        map[id] = { ...price, source: "tcgdex", updated: file.updated.slice(0, 10) };
+        bySet.set(setId, map);
+      }
+      return bySet;
+    })
+    .catch(() => new Map());
+  return bundled;
+}
+
 /**
  * Ceny všech karet sady (včetně podsad, např. me55 + me55c).
  * Při chybě sítě vrací poslední uložené ceny, případně prázdnou mapu.
  */
 export async function loadSetPrices(setIds: string[]): Promise<PriceMap> {
-  const parts = await Promise.all(setIds.map(loadOne));
+  const local = await loadBundled();
+  const parts = await Promise.all(setIds.map((id) => local.get(id) ?? loadOne(id)));
   return Object.assign({}, ...parts);
 }
 
@@ -115,10 +149,6 @@ function loadOne(setId: string): Promise<PriceMap> {
     inflight.set(setId, p);
   }
   return p;
-}
-
-export function hasPrices(setId: string): boolean {
-  return memory.has(setId);
 }
 
 /** Cena konkrétního provedení karty. Reverse a vzorované holo mají vlastní cenu, pokud ji trh uvádí. */

@@ -5,7 +5,7 @@ import { type CardPrice, formatEur, formatUsd, loadSetPrices, variantPrice } fro
 import { collectionKey, getState, recordOpening } from "../store";
 import type { Card, PulledCard, SetInfo } from "../types";
 import { animationEnd, append, clear, h, prefersReducedMotion, sleep } from "../ui/dom";
-import { cardBack, cardEl, preload } from "../ui/holo";
+import { CARD_BACK_URL, cardBack, cardEl, enableTilt, preload } from "../ui/holo";
 import { packEl } from "../ui/pack";
 import { openCardModal } from "./cardModal";
 
@@ -39,7 +39,7 @@ async function renderInventory(root: HTMLElement) {
         h(
           "a",
           { class: "inventory__item", href: `#/open/${s.id}` },
-          packEl(s),
+          packEl(s, { tilt: true }),
           h("strong", null, s.name),
           h("span", { class: "chip" }, `${packs[s.id]}×`),
         ),
@@ -105,15 +105,16 @@ class OpeningStage {
       return;
     }
 
-    const pack = packEl(this.set);
-    pack.classList.add("pack--big", "pack--idle");
-    const cut = h("div", { class: "pack__cut" });
-    pack.append(cut);
-    const hint = h("p", { class: "stage__hint" }, "Přejeď prstem přes horní okraj nebo klepni na balíček");
+    const pack = packEl(this.set, { large: true, tilt: true });
+    pack.classList.add("pack3d--big", "pack3d--idle");
+    const cut = h("div", { class: "pack3d__cut" });
+    pack.querySelector(".pack3d__body")!.append(cut);
+    const hint = h("p", { class: "stage__hint" }, "Přejeď prstem přes horní okraj, nebo klepni. Tažením jinde balíčkem otočíš.");
     this.stage.append(h("div", { class: "pack-wrap" }, pack), hint);
 
-    // Roztržení: tažení přes horní část balíčku nebo prosté klepnutí.
-    let startX: number | null = null;
+    // Tažení přes horní pruh balíček roztrhne, tažení jinde jím otáčí ve 3D,
+    // prosté klepnutí ho otevře.
+    let drag: { x: number; mode: "tear" | "spin" } | null = null;
     let done = false;
     const once = (fn: () => void) => () => {
       if (done) return;
@@ -122,25 +123,41 @@ class OpeningStage {
     };
     const tear = once(() => {
       hint.remove();
+      pack.classList.remove("is-dragging");
+      pack.style.setProperty("--spin", "0deg");
       this.open(pack);
     });
     pack.addEventListener("pointerdown", (e) => {
-      startX = e.clientX;
+      const r = pack.getBoundingClientRect();
+      drag = { x: e.clientX, mode: e.clientY - r.top < r.height * 0.3 ? "tear" : "spin" };
+      pack.classList.add("is-dragging");
       pack.setPointerCapture(e.pointerId);
     });
     pack.addEventListener("pointermove", (e) => {
-      if (startX === null) return;
-      const r = pack.getBoundingClientRect();
-      const progress = Math.min(1, Math.abs(e.clientX - startX) / (r.width * 0.7));
+      if (!drag || done) return;
+      const dx = e.clientX - drag.x;
+      if (drag.mode === "spin") {
+        pack.style.setProperty("--spin", `${dx * 0.9}deg`);
+        return;
+      }
+      const progress = Math.min(1, Math.abs(dx) / (pack.getBoundingClientRect().width * 0.7));
       cut.style.setProperty("--cut", String(progress));
       if (progress >= 1) tear();
     });
-    pack.addEventListener("pointerup", (e) => {
-      const moved = startX !== null && Math.abs(e.clientX - startX) > 8;
-      startX = null;
+    const release = (e: PointerEvent) => {
+      if (!drag) return;
+      const moved = Math.abs(e.clientX - drag.x) > 8;
+      drag = null;
+      pack.classList.remove("is-dragging");
+      if (done) return;
       if (!moved) tear();
-      else if (!done) cut.style.setProperty("--cut", "0");
-    });
+      else {
+        cut.style.setProperty("--cut", "0");
+        pack.style.setProperty("--spin", "0deg");
+      }
+    };
+    pack.addEventListener("pointerup", release);
+    pack.addEventListener("pointercancel", release);
 
     append(this.controls, [
       h("button", { class: "btn", onclick: once(() => this.quickOpen(1)) }, "Otevřít bez animace"),
@@ -160,32 +177,43 @@ class OpeningStage {
   private async open(pack: HTMLElement) {
     clear(this.controls);
     const { cards, fresh } = this.draw();
-    const imagesReady = preload(cards.map((c) => c.card.img));
+    const imagesReady = preload([...cards.map((c) => c.card.img), CARD_BACK_URL]);
 
-    pack.classList.remove("pack--idle");
-    pack.classList.add("pack--torn");
-    await Promise.race([Promise.all([animationEnd(pack, 900), imagesReady]), sleep(2500)]);
+    pack.classList.remove("pack3d--idle");
+    pack.classList.add("pack3d--torn");
+    const main = pack.querySelector(".pack3d__piece--main")!;
+    await Promise.race([Promise.all([animationEnd(main, 1400), imagesReady]), sleep(2600)]);
     this.reveal(cards, fresh);
   }
 
   private reveal(cards: PulledCard[], fresh: Set<string>) {
     clear(this.stage);
     const counter = h("div", { class: "stage__counter" });
-    const pile = h("div", { class: "pile" });
-    this.stage.append(pile, counter, h("p", { class: "stage__hint" }, "Klepni na kartu pro další"));
+    const stack = h("div", { class: "pile__stack" });
+    const pile = h("div", { class: "pile" }, stack);
+    enableTilt(pile);
+    this.stage.append(pile, counter, h("p", { class: "stage__hint" }, "Klepni na kartu, nebo ji odhoď do strany"));
 
     const items = cards.map((pulled, i) => {
       const faceDown = i >= cards.length - FACE_DOWN;
       const info = rarityInfo(pulled.card.rarity);
       const front = cardEl(pulled.card, pulled.variant, { tilt: true });
       const isNew = fresh.has(collectionKey(pulled.card.id, pulled.variant));
+      // Karty v balíčku nejsou srovnané úplně přesně: lehké pootočení a hloubka.
+      const rot = ((i * 37) % 7) - 3;
       const item = h(
         "div",
         {
           class: `pile__item${faceDown ? " is-down" : ""}${info.hit ? " is-hit" : ""}`,
-          style: `--rc: ${info.color}; z-index: ${cards.length - i}`,
+          style: `--rc: ${info.color}; --i: ${i}; --z: ${-i * 3}px; --rot: ${rot * 0.6}deg; z-index: ${cards.length - i}`,
         },
-        h("div", { class: "flip" }, h("div", { class: "flip__front" }, front), h("div", { class: "flip__back" }, cardBack())),
+        h(
+          "div",
+          { class: "flip" },
+          h("div", { class: "flip__core" }),
+          h("div", { class: "flip__front" }, front),
+          h("div", { class: "flip__back" }, cardBack()),
+        ),
         h(
           "div",
           { class: "pile__tag" },
@@ -194,7 +222,7 @@ class OpeningStage {
           info.hit ? h("span", { class: "badge", style: `background: ${info.color}; color: #111` }, pulled.card.rarity) : null,
         ),
       );
-      pile.append(item);
+      stack.append(item);
       return item;
     });
 
@@ -206,6 +234,17 @@ class OpeningStage {
     };
     update();
 
+    const throwAway = async (item: HTMLElement, dir: number) => {
+      item.style.setProperty("--dir", String(dir));
+      item.classList.add("is-gone");
+      index++;
+      update();
+      if (index >= items.length) {
+        await sleep(300);
+        this.summary(cards, fresh);
+      }
+    };
+
     const advance = async () => {
       if (busy) return;
       const item = items[index];
@@ -214,18 +253,39 @@ class OpeningStage {
       if (item.classList.contains("is-down")) {
         await this.flip(item, rarityInfo(cards[index].card.rarity).rank);
       } else {
-        item.classList.add("is-gone");
-        index++;
-        update();
-        if (index >= items.length) {
-          await sleep(250);
-          this.summary(cards, fresh);
-        }
+        await throwAway(item, -1);
       }
       busy = false;
     };
 
-    pile.addEventListener("click", advance);
+    // Odhozování karty tažením: karta se při tom naklání ve 3D.
+    let drag: { x: number; item: HTMLElement } | null = null;
+    let dx = 0;
+    pile.addEventListener("pointerdown", (e) => {
+      const item = items[index];
+      if (busy || !item) return;
+      drag = { x: e.clientX, item };
+      dx = 0;
+      pile.setPointerCapture(e.pointerId);
+    });
+    pile.addEventListener("pointermove", (e) => {
+      if (!drag || drag.item.classList.contains("is-down")) return;
+      dx = e.clientX - drag.x;
+      drag.item.classList.add("is-dragging");
+      drag.item.style.transform = `translate3d(${dx}px, ${-Math.abs(dx) * 0.08}px, 40px) rotateY(${dx * 0.15}deg) rotateZ(${dx * 0.05}deg)`;
+    });
+    const release = () => {
+      if (!drag) return;
+      const { item } = drag;
+      drag = null;
+      item.classList.remove("is-dragging");
+      item.style.transform = "";
+      if (Math.abs(dx) > 70 && !busy) throwAway(item, Math.sign(dx));
+      else if (Math.abs(dx) < 8) advance();
+    };
+    pile.addEventListener("pointerup", release);
+    pile.addEventListener("pointercancel", release);
+
     this.controls.append(
       h("button", { class: "btn", onclick: () => this.summary(cards, fresh) }, "Přeskočit na přehled"),
     );
@@ -241,9 +301,12 @@ class OpeningStage {
       burst(item, rank);
       if (rank >= 8) flash();
     }
+    // Otočení ve 3D: karta se při něm zvedne k divákovi.
     item.classList.remove("is-down");
+    item.classList.add("is-flipping");
+    await animationEnd(item.querySelector(".flip")!, 900);
+    item.classList.remove("is-flipping");
     item.classList.add("is-flipped");
-    await sleep(450);
   }
 
   /** Otevře více balíčků naráz bez animace a ukáže souhrn. */
