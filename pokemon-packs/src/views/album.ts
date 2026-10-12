@@ -154,7 +154,7 @@ function tile(o: Owned, set: SetInfo, prices: Record<string, CardPrice>): HTMLEl
   return h(
     "button",
     { class: `album-tile${o.total ? "" : " album-tile--missing"}`, onclick: () => openCardModal(o.card, set) },
-    cardEl(o.card, shown, { missing: o.total === 0 }),
+    cardEl(o.card, shown, { missing: o.total === 0, tilt: true, gyro: false }),
     o.total > 1 ? h("span", { class: "count-badge", title: `${o.total - 1} duplikátů` }, `×${o.total}`) : null,
     h(
       "div",

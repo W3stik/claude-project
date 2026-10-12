@@ -1145,6 +1145,153 @@ a.chip {
   text-align: center;
 }
 
+/* --- 3D karta a prohlížeč ------------------------------------------------- */
+
+.card3d {
+  --depth: 3px;
+  --shadow-scale: 1;
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--card-ratio);
+  perspective: 1400px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.card3d.is-dragging {
+  cursor: grabbing;
+}
+
+.card3d__body {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+.card3d__face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+}
+
+.card3d__face--front {
+  transform: translateZ(calc(var(--depth) / 2));
+}
+
+.card3d__face--back {
+  transform: rotateY(180deg) translateZ(calc(var(--depth) / 2));
+}
+
+/* Lesk v prohlížeči řídí natočení karty, ne kurzor. */
+.card3d .pcard {
+  transform: none;
+  transition: none;
+}
+
+.card3d .pcard__inner {
+  box-shadow: none;
+}
+
+/* Hrana karty: bílý papír se světle šedým jádrem jako u skutečných karet.
+   Pásy hran nejdou až do zaoblených rohů. */
+.card3d__edge {
+  position: absolute;
+  background: linear-gradient(90deg, #f3f4f7 0 30%, #9da3ad 45% 55%, #f3f4f7 70%);
+}
+
+.card3d__edge--top,
+.card3d__edge--bottom {
+  left: 4.6%;
+  right: 4.6%;
+  height: var(--depth);
+  background: linear-gradient(180deg, #f3f4f7 0 30%, #9da3ad 45% 55%, #f3f4f7 70%);
+}
+
+.card3d__edge--top {
+  top: calc(var(--depth) / -2);
+  transform: rotateX(90deg);
+}
+
+.card3d__edge--bottom {
+  bottom: calc(var(--depth) / -2);
+  transform: rotateX(-90deg);
+}
+
+.card3d__edge--left,
+.card3d__edge--right {
+  top: 3.3%;
+  bottom: 3.3%;
+  width: var(--depth);
+}
+
+.card3d__edge--left {
+  left: calc(var(--depth) / -2);
+  transform: rotateY(-90deg);
+}
+
+.card3d__edge--right {
+  right: calc(var(--depth) / -2);
+  transform: rotateY(90deg);
+}
+
+.card3d__shadow {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -7%;
+  height: 5%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.6), transparent);
+  transform: scaleX(var(--shadow-scale));
+  pointer-events: none;
+}
+
+.card3d-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 26px;
+}
+
+.card3d-controls .btn {
+  min-height: 38px;
+  padding: 6px 12px;
+}
+
+.card3d-hint {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+/* Celoobrazovkový prohlížeč */
+.viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px calc(24px + env(safe-area-inset-bottom));
+  background: radial-gradient(900px 600px at 50% 40%, #252c48, #07080c 75%);
+  animation: fade-in 0.2s ease-out;
+}
+
+.viewer .card3d {
+  width: min(78vw, calc((100dvh - 190px) * 0.716), 520px);
+}
+
+.viewer__title {
+  margin: 0 0 18px;
+  text-align: center;
+}
+
 /* --- Otevírání ------------------------------------------------------------ */
 
 .stage {
@@ -1568,9 +1715,10 @@ a.chip {
 }
 
 .card-detail__card {
-  max-width: 380px;
+  max-width: 340px;
   width: 100%;
   margin: 0 auto;
+  padding-top: 14px;
 }
 
 .card-detail__info p {
@@ -1589,7 +1737,8 @@ a.chip {
   }
 
   .card-detail__card {
-    max-width: 280px;
+    max-width: 230px;
+    padding-top: 26px;
   }
 
   .shop-tile__pack {

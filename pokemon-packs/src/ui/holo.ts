@@ -39,11 +39,16 @@ function listenGyro() {
   window.addEventListener("deviceorientation", onOrientation);
 }
 
-/** Zapne naklápění a pohyb lesku pro danou kartu. */
-export function enableTilt(el: HTMLElement) {
+/**
+ * Zapne naklápění a pohyb lesku pro danou kartu. Bez gyroskopu jen podle
+ * kurzoru (vhodné pro mřížky se stovkami karet).
+ */
+export function enableTilt(el: HTMLElement, { gyro = true }: { gyro?: boolean } = {}) {
   setTilt(el, 0.5, 0.5, false);
-  tilted.add(el);
-  listenGyro();
+  if (gyro) {
+    tilted.add(el);
+    listenGyro();
+  }
 
   el.addEventListener("pointermove", (e) => {
     const r = el.getBoundingClientRect();
@@ -59,6 +64,8 @@ export function enableTilt(el: HTMLElement) {
 export interface CardElOptions {
   large?: boolean;
   tilt?: boolean;
+  /** Naklánět i podle náklonu telefonu (výchozí ano). */
+  gyro?: boolean;
   missing?: boolean;
 }
 
@@ -88,7 +95,7 @@ export function cardEl(card: Card, variant: Variant, opts: CardElOptions = {}): 
       h("div", { class: "pcard__glare" }),
     ),
   );
-  if (opts.tilt) enableTilt(el);
+  if (opts.tilt) enableTilt(el, { gyro: opts.gyro });
   return el;
 }
 

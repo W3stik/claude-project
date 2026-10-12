@@ -26,7 +26,11 @@ a karty Pokémon TCG, šance na tah podle reálných měření a tržní ceny ka
 - **Album**: přehled všech sad s procentem kompletnosti. Album sady zobrazuje všechny karty
   (chybějící zašedle), počet kusů (×N), provedení (RH, PB, MB) a cenu. Filtry Vše / Mám / Chybí / Duplikáty,
   filtr rarity, hledání a řazení podle čísla, rarity, jména, ceny nebo počtu kusů.
-- **Detail karty**: velký obrázek s holo efektem, počty podle provedení a duplikáty, datum prvního získání
+- **3D prohlížeč karty** (z alba i z přehledu otevřeného balíčku): karta s lícem, oficiálním rubem a hranou,
+  kterou otáčíš tažením do všech stran, švihem ji roztočíš, dvojklikem / „Otočit“ obrátíš na rub; lesk
+  se mění podle natočení a na telefonu karta reaguje i na náklon. Jde zobrazit přes celou obrazovku.
+  Dlaždice v albu se naklánějí pod kurzorem.
+- **Detail karty**: 3D náhled s holo efektem, počty podle provedení a duplikáty, datum prvního získání
   a ceny z Cardmarket (EUR) a TCGplayer (USD) s odkazy.
 - **Hodnota sbírky** podle aktuálních cen, **záloha** sbírky do souboru a obnovení na jiném zařízení.
 - Funguje **offline**: data sad jsou součástí aplikace, obrázky karet se po prvním zobrazení ukládají.
