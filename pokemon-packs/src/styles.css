@@ -232,6 +232,11 @@ img {
   white-space: nowrap;
 }
 
+a.chip {
+  color: var(--text);
+  text-decoration: none;
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -530,7 +535,7 @@ img {
 }
 
 .pack3d--idle .pack3d__body {
-  animation: pack-sway 5s ease-in-out infinite;
+  animation: pack-sway 5s var(--sway-delay, 0s) ease-in-out infinite;
 }
 
 .pack3d.is-dragging .pack3d__body {
@@ -614,7 +619,66 @@ img {
 }
 
 .pack3d--idle .pack3d__face--front::after {
-  animation: foil-sweep 5s ease-in-out infinite;
+  animation: foil-sweep 5s var(--sway-delay, 0s) ease-in-out infinite;
+}
+
+/* Tajný náznak vzácné karty: drobná jiskřička se září, která občas problikne. */
+.pack3d__twinkle {
+  position: absolute;
+  width: 12%;
+  aspect-ratio: 1;
+  margin: -6% 0 0 -6%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.75), rgb(255 255 255 / 0) 65%);
+  opacity: 0;
+  pointer-events: none;
+  animation-name: twinkle;
+  animation-timing-function: ease-out;
+  animation-iteration-count: infinite;
+  z-index: 2;
+}
+
+.pack3d__twinkle::after {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+  background: #fff;
+}
+
+.pack3d__twinkle--2 {
+  background: radial-gradient(circle, rgb(255 217 90 / 0.85), rgb(255 217 90 / 0) 65%);
+}
+
+.pack3d__twinkle--2::after {
+  background: radial-gradient(circle, #fff 25%, #ffd95a 70%);
+}
+
+.pack3d__twinkle--3 {
+  width: 15%;
+  margin: -7.5% 0 0 -7.5%;
+  background: radial-gradient(circle, rgb(255 122 217 / 0.8), rgb(85 193 242 / 0.4) 45%, transparent 68%);
+}
+
+.pack3d__twinkle--3::after {
+  background: conic-gradient(#ff7ad9, #ffd84a, #7ee0b5, #55c1f2, #c48af0, #ff7ad9);
+}
+
+@keyframes twinkle {
+  0%,
+  86% {
+    opacity: 0;
+    transform: scale(0.2) rotate(0deg);
+  }
+  91% {
+    opacity: 1;
+    transform: scale(1) rotate(45deg);
+  }
+  97%,
+  100% {
+    opacity: 0;
+    transform: scale(0.3) rotate(90deg);
+  }
 }
 
 @keyframes foil-sweep {
@@ -681,7 +745,7 @@ img {
 }
 
 .pack3d--idle .pack3d__shadow {
-  animation: shadow-sway 5s ease-in-out infinite;
+  animation: shadow-sway 5s var(--sway-delay, 0s) ease-in-out infinite;
 }
 
 @keyframes shadow-sway {
@@ -794,6 +858,77 @@ img {
 @keyframes fade-out {
   to {
     opacity: 0;
+  }
+}
+
+/* --- Regál s balíčky ------------------------------------------------------ */
+
+.shelf {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 28px 18px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 12px 4px 96px;
+}
+
+.shelf__slot {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1.3);
+}
+
+.shelf__slot:hover {
+  transform: translateY(-6px);
+}
+
+.shelf__slot.is-selected {
+  transform: translateY(-16px) scale(1.06);
+}
+
+.shelf__slot.is-selected .pack3d {
+  filter: drop-shadow(0 0 2px var(--accent)) drop-shadow(0 0 12px var(--accent));
+}
+
+.shelf__slot--new {
+  animation: shelf-in 0.5s ease-out;
+}
+
+@keyframes shelf-in {
+  from {
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+}
+
+.shelf__actions {
+  max-width: 760px;
+  margin: 0 auto;
+  position: sticky;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 8px);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .shelf {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px 14px;
   }
 }
 
@@ -1084,7 +1219,7 @@ img {
   gap: 6px;
 }
 
-.pile__item.is-current:not(.is-down) .pile__tag {
+.pile__item.is-current .pile__tag {
   display: flex;
 }
 
@@ -1119,51 +1254,7 @@ img {
   background: #d9dde6;
 }
 
-.is-down .flip {
-  transform: rotateY(180deg);
-}
-
-.is-flipping .flip {
-  animation: flip-lift 0.75s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@keyframes flip-lift {
-  0% {
-    transform: translateZ(0) rotateY(180deg);
-  }
-  45% {
-    transform: translateZ(110px) rotateX(8deg) rotateY(95deg);
-  }
-  100% {
-    transform: translateZ(0) rotateY(0deg);
-  }
-}
-
-.is-charging .flip {
-  animation: charge 0.18s linear infinite;
-}
-
-.is-charging .pback {
-  box-shadow:
-    0 0 24px 6px var(--rc),
-    0 0 60px 18px color-mix(in srgb, var(--rc) 60%, transparent);
-  transition: box-shadow 0.4s;
-}
-
-@keyframes charge {
-  0%,
-  100% {
-    transform: translateZ(20px) rotateY(180deg);
-  }
-  25% {
-    transform: translate3d(-3px, 0, 20px) rotate(-1deg) rotateY(180deg);
-  }
-  75% {
-    transform: translate3d(3px, 0, 20px) rotate(1deg) rotateY(180deg);
-  }
-}
-
-.is-hit.is-flipped .pcard__inner {
+.is-revealed .pcard__inner {
   box-shadow:
     0 0 22px 4px var(--rc),
     0 6px 16px rgb(0 0 0 / 0.45);

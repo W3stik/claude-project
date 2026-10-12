@@ -1,4 +1,4 @@
-import { type Outcome, type PackProfile } from "./odds";
+import { type Outcome, type PackProfile, rarityInfo } from "./odds";
 import type { Card, PulledCard } from "./types";
 
 export type Rng = () => number;
@@ -51,4 +51,27 @@ export function openPack(profile: PackProfile, pools: Map<string, Card[]>, rng: 
     }
   }
   return pulled;
+}
+
+/** Uložitelná podoba balíčku (jen id karet a provedení). */
+export const toSealed = (cards: PulledCard[]) => ({ cards: cards.map((c) => ({ id: c.card.id, variant: c.variant })) });
+
+/** Obnoví karty uloženého balíčku; když některá karta v datech chybí, vrátí null. */
+export function fromSealed(sealed: { cards: { id: string; variant: PulledCard["variant"] }[] }, byId: Map<string, Card>) {
+  const cards: PulledCard[] = [];
+  for (const ref of sealed.cards) {
+    const card = byId.get(ref.id);
+    if (!card) return null;
+    cards.push({ card, variant: ref.variant });
+  }
+  return cards;
+}
+
+/**
+ * Síla tajného náznaku na obalu: 0 = nic, 1 = Illustration / Ultra Rare,
+ * 2 = Special Illustration Rare, 3 = zlatá a další nejvzácnější karty.
+ */
+export function hintLevel(cards: PulledCard[]): number {
+  const best = Math.max(...cards.map((c) => rarityInfo(c.card.rarity).rank));
+  return best >= 9 ? 3 : best >= 8 ? 2 : best >= 6 ? 1 : 0;
 }

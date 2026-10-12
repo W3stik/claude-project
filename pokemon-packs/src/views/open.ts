@@ -1,16 +1,13 @@
-import { loadPools, loadSets, setIdOfCard } from "../data";
+import { loadCards, loadPools, loadSets, setIdOfCard } from "../data";
 import { packProfile, rarityInfo, VARIANT_LABEL } from "../odds";
-import { openPack } from "../pack";
+import { fromSealed, hintLevel, openPack } from "../pack";
 import { type CardPrice, formatEur, formatUsd, loadSetPrices, variantPrice } from "../prices";
-import { collectionKey, getState, recordOpening } from "../store";
+import { collectionKey, getState, nextSealed, recordOpening } from "../store";
 import type { Card, PulledCard, SetInfo } from "../types";
 import { animationEnd, append, clear, h, prefersReducedMotion, sleep } from "../ui/dom";
 import { CARD_BACK_URL, cardBack, cardEl, enableTilt, preload } from "../ui/holo";
 import { packEl } from "../ui/pack";
 import { openCardModal } from "./cardModal";
-
-/** Kolik posledních karet balíčku se odhaluje lícem dolů (vzácné sloty). */
-const FACE_DOWN = 3;
 
 const priceSetIds = (cards: PulledCard[]) => [...new Set(cards.map((c) => setIdOfCard(c.card.id)))];
 
@@ -56,8 +53,8 @@ export async function renderOpen(root: HTMLElement, setId?: string) {
     root.append(h("p", { class: "empty" }, "Neznámá sada."));
     return;
   }
-  const pools = await loadPools(set.id);
-  new OpeningStage(root, set, pools).showPack();
+  const [pools, cards] = await Promise.all([loadPools(set.id), loadCards(set.id)]);
+  new OpeningStage(root, set, pools, new Map(cards.map((c) => [c.id, c]))).showPack();
 }
 
 class OpeningStage {
@@ -69,6 +66,7 @@ class OpeningStage {
     root: HTMLElement,
     private set: SetInfo,
     private pools: Map<string, Card[]>,
+    private byId: Map<string, Card>,
   ) {
     root.append(
       h(
@@ -105,7 +103,9 @@ class OpeningStage {
       return;
     }
 
-    const pack = packEl(this.set, { large: true, tilt: true });
+    // Balíček vybraný z regálu má obsah daný předem (a s ním i tajný náznak).
+    const sealed = this.sealedCards();
+    const pack = packEl(this.set, { large: true, tilt: true, hint: sealed ? hintLevel(sealed) : 0 });
     pack.classList.add("pack3d--big", "pack3d--idle");
     const cut = h("div", { class: "pack3d__cut" });
     pack.querySelector(".pack3d__body")!.append(cut);
@@ -167,8 +167,14 @@ class OpeningStage {
     ]);
   }
 
+  /** Obsah dalšího balíčku vybraného z regálu, pokud nějaký čeká. */
+  private sealedCards(): PulledCard[] | null {
+    const next = nextSealed(this.set.id);
+    return next ? fromSealed(next, this.byId) : null;
+  }
+
   private draw(): { cards: PulledCard[]; fresh: Set<string> } {
-    const cards = openPack(packProfile(this.set.id), this.pools);
+    const cards = this.sealedCards() ?? openPack(packProfile(this.set.id), this.pools);
     const fresh = recordOpening(this.set.id, cards);
     this.updateRemaining();
     return { cards, fresh };
@@ -195,7 +201,6 @@ class OpeningStage {
     this.stage.append(pile, counter, h("p", { class: "stage__hint" }, "Klepni na kartu, nebo ji odhoď do strany"));
 
     const items = cards.map((pulled, i) => {
-      const faceDown = i >= cards.length - FACE_DOWN;
       const info = rarityInfo(pulled.card.rarity);
       const front = cardEl(pulled.card, pulled.variant, { tilt: true });
       const isNew = fresh.has(collectionKey(pulled.card.id, pulled.variant));
@@ -204,7 +209,7 @@ class OpeningStage {
       const item = h(
         "div",
         {
-          class: `pile__item${faceDown ? " is-down" : ""}${info.hit ? " is-hit" : ""}`,
+          class: `pile__item${info.hit ? " is-hit" : ""}`,
           style: `--rc: ${info.color}; --i: ${i}; --z: ${-i * 3}px; --rot: ${rot * 0.6}deg; z-index: ${cards.length - i}`,
         },
         h(
@@ -233,12 +238,18 @@ class OpeningStage {
       items.forEach((item, i) => item.classList.toggle("is-current", i === index));
     };
     update();
+    // Vzácná karta hned navrchu (výjimečně) se rozzáří po vyjetí z balíčku.
+    if (items[0]?.classList.contains("is-hit")) {
+      setTimeout(() => this.revealHit(items[0], rarityInfo(cards[0].card.rarity).rank), 700);
+    }
 
     const throwAway = async (item: HTMLElement, dir: number) => {
       item.style.setProperty("--dir", String(dir));
       item.classList.add("is-gone");
       index++;
       update();
+      const next = items[index];
+      if (next?.classList.contains("is-hit")) this.revealHit(next, rarityInfo(cards[index].card.rarity).rank);
       if (index >= items.length) {
         await sleep(300);
         this.summary(cards, fresh);
@@ -250,11 +261,7 @@ class OpeningStage {
       const item = items[index];
       if (!item) return;
       busy = true;
-      if (item.classList.contains("is-down")) {
-        await this.flip(item, rarityInfo(cards[index].card.rarity).rank);
-      } else {
-        await throwAway(item, -1);
-      }
+      await throwAway(item, -1);
       busy = false;
     };
 
@@ -269,7 +276,7 @@ class OpeningStage {
       pile.setPointerCapture(e.pointerId);
     });
     pile.addEventListener("pointermove", (e) => {
-      if (!drag || drag.item.classList.contains("is-down")) return;
+      if (!drag) return;
       dx = e.clientX - drag.x;
       drag.item.classList.add("is-dragging");
       drag.item.style.transform = `translate3d(${dx}px, ${-Math.abs(dx) * 0.08}px, 40px) rotateY(${dx * 0.15}deg) rotateZ(${dx * 0.05}deg)`;
@@ -291,22 +298,12 @@ class OpeningStage {
     );
   }
 
-  private async flip(item: HTMLElement, rank: number) {
-    const hit = item.classList.contains("is-hit");
-    if (hit && !prefersReducedMotion()) {
-      // Napětí před odhalením: karta se rozzáří barvou rarity.
-      item.classList.add("is-charging");
-      await sleep(rank >= 8 ? 1100 : 600);
-      item.classList.remove("is-charging");
-      burst(item, rank);
-      if (rank >= 8) flash();
-    }
-    // Otočení ve 3D: karta se při něm zvedne k divákovi.
-    item.classList.remove("is-down");
-    item.classList.add("is-flipping");
-    await animationEnd(item.querySelector(".flip")!, 900);
-    item.classList.remove("is-flipping");
-    item.classList.add("is-flipped");
+  /** Vzácná karta se po odhalení rozzáří barvou rarity a vybuchne částicemi. */
+  private revealHit(item: HTMLElement, rank: number) {
+    item.classList.add("is-revealed");
+    if (prefersReducedMotion()) return;
+    burst(item, rank);
+    if (rank >= 8) flash();
   }
 
   /** Otevře více balíčků naráz bez animace a ukáže souhrn. */

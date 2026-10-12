@@ -3,6 +3,7 @@ import { subscribe, unopenedTotal } from "./store";
 import { clear, h } from "./ui/dom";
 import { renderAlbum } from "./views/album";
 import { renderOpen } from "./views/open";
+import { renderPick } from "./views/pick";
 import { renderSettings } from "./views/settings";
 import { renderShop } from "./views/shop";
 
@@ -14,7 +15,11 @@ const routes: Record<string, (root: HTMLElement, arg?: string) => void | Promise
   open: renderOpen,
   album: renderAlbum,
   more: renderSettings,
+  pick: renderPick,
 };
+
+/** Podstránky, které v navigaci patří pod jinou záložku. */
+const TAB_OF: Record<string, string> = { pick: "shop" };
 
 let renderId = 0;
 
@@ -24,7 +29,7 @@ async function route() {
   const id = ++renderId;
 
   document.querySelectorAll<HTMLAnchorElement>(".tabbar a").forEach((a) => {
-    a.classList.toggle("active", a.dataset.route === (routes[name] ? name : "shop"));
+    a.classList.toggle("active", a.dataset.route === (routes[name] ? (TAB_OF[name] ?? name) : "shop"));
   });
 
   // Každá obrazovka se kreslí do nového kontejneru, aby pomalé načítání

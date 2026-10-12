@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PACKS, oddsTable, packProfile, packSize, rarityInfo, RARITIES } from "./odds";
-import { byRarity, openPack } from "./pack";
+import { byRarity, fromSealed, hintLevel, openPack, toSealed } from "./pack";
+import { getState, nextSealed, pickFromShelf, recordOpening, resetState, setShelf } from "./store";
 import type { Card, SetInfo } from "./types";
 
 const dataDir = new URL("../public/data/", import.meta.url);
@@ -99,5 +100,42 @@ describe("otevírání balíčků", () => {
     expect(rate("Illustration Rare")).toBeCloseTo(0.1097, 2);
     expect(rate("Ultra Rare")).toBeCloseTo(0.0806, 2);
     expect(rate("Special Illustration Rare")).toBeCloseTo(0.0125, 2);
+  });
+});
+
+describe("regál a předem určené balíčky", () => {
+  const cards = cardsOf("me1");
+  const pools = byRarity(cards);
+  const byId = new Map(cards.map((c) => [c.id, c]));
+
+  it("uložený balíček se obnoví na stejné karty", () => {
+    const pack = openPack(packProfile("me1"), pools, seeded(5));
+    expect(fromSealed(toSealed(pack), byId)).toEqual(pack);
+    expect(fromSealed({ cards: [{ id: "neexistuje-1", variant: "normal" }] }, byId)).toBeNull();
+  });
+
+  it("náznak odpovídá nejvzácnější kartě v balíčku", () => {
+    const of = (rarity: string) => [{ card: cards.find((c) => c.rarity === rarity)!, variant: "normal" as const }];
+    expect(hintLevel(of("Double Rare"))).toBe(0);
+    expect(hintLevel(of("Illustration Rare"))).toBe(1);
+    expect(hintLevel(of("Ultra Rare"))).toBe(1);
+    expect(hintLevel(of("Special Illustration Rare"))).toBe(2);
+    expect(hintLevel(of("Mega Hyper Rare"))).toBe(3);
+  });
+
+  it("vybraný balíček z regálu se otevře jako první a jeho místo zaplní nový", () => {
+    resetState();
+    const shelf = Array.from({ length: 10 }, (_, i) => toSealed(openPack(packProfile("me1"), pools, seeded(100 + i))));
+    setShelf("me1", shelf);
+    const replacement = toSealed(openPack(packProfile("me1"), pools, seeded(999)));
+    pickFromShelf("me1", 3, replacement);
+
+    expect(getState().packs.me1).toBe(1);
+    expect(nextSealed("me1")).toEqual(shelf[3]);
+    expect(getState().shelf.me1[3]).toEqual(replacement);
+
+    recordOpening("me1", fromSealed(shelf[3], byId)!);
+    expect(getState().packs.me1).toBeUndefined();
+    expect(nextSealed("me1")).toBeUndefined();
   });
 });

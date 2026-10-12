@@ -6,8 +6,8 @@ import { h, toast } from "../ui/dom";
 import { openModal } from "../ui/modal";
 import { formatDate, packEl } from "../ui/pack";
 
-const PRODUCTS = [
-  { label: "1 balíček", count: 1 },
+/** Hromadné balíčky se berou naslepo; jednotlivý balíček si hráč vybírá z regálu. */
+const BULK = [
   { label: "10 balíčků", count: 10 },
   { label: "Booster box (36)", count: 36 },
 ];
@@ -86,7 +86,8 @@ function setTile(set: SetInfo): HTMLElement {
       h(
         "div",
         { class: "shop-tile__buy" },
-        ...PRODUCTS.map((p) =>
+        h("a", { class: "btn", href: `#/pick/${set.id}` }, h("span", null, "1 balíček"), h("small", null, "Vybrat z regálu")),
+        ...BULK.map((p) =>
           h(
             "button",
             {

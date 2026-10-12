@@ -42,11 +42,13 @@ function fallbackArt(set: SetInfo): HTMLElement {
  * Obě části (pruh i zbytek) kreslí stejný obrázek, jen každá jeho jiný výřez,
  * takže při roztržení se obal opravdu rozdělí.
  */
-export function packEl(set: SetInfo, opts: { large?: boolean; tilt?: boolean } = {}): HTMLElement {
+export function packEl(set: SetInfo, opts: { large?: boolean; tilt?: boolean; hint?: number } = {}): HTMLElement {
   const [c1, c2] = packProfile(set.id).colors;
   const art = packArtUrl(set.id, opts.large);
   const face = (side: "front" | "back") =>
     h("div", { class: `pack3d__face pack3d__face--${side}` }, side === "front" ? fallbackArt(set) : null);
+  const mainFront = face("front");
+  if (opts.hint) mainFront.append(twinkle(opts.hint));
 
   const pack = h(
     "div",
@@ -66,7 +68,7 @@ export function packEl(set: SetInfo, opts: { large?: boolean; tilt?: boolean } =
         h(
           "div",
           { class: "pack3d__piece pack3d__piece--main" },
-          face("front"),
+          mainFront,
           face("back"),
           h("div", { class: "pack3d__side pack3d__side--left" }),
           h("div", { class: "pack3d__side pack3d__side--right" }),
@@ -85,6 +87,20 @@ export function packEl(set: SetInfo, opts: { large?: boolean; tilt?: boolean } =
   }
   if (opts.tilt) enableTilt(pack);
   return pack;
+}
+
+/**
+ * Tajný náznak vzácné karty: drobná jiskřička, která jednou za čas
+ * problikne na náhodném místě obalu. Čím vzácnější karta, tím častěji a barevněji.
+ */
+function twinkle(level: number): HTMLElement {
+  const period = [0, 7.5, 5.5, 3.8][level];
+  const x = 18 + Math.random() * 64;
+  const y = 22 + Math.random() * 60;
+  return h("div", {
+    class: `pack3d__twinkle pack3d__twinkle--${level}`,
+    style: `left: ${x}%; top: ${y}%; animation-duration: ${period}s; animation-delay: ${-Math.random() * period}s`,
+  });
 }
 
 const dateFmt = new Intl.DateTimeFormat("cs-CZ", { day: "numeric", month: "long", year: "numeric" });

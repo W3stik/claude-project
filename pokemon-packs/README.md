@@ -5,16 +5,22 @@ a karty Pokémon TCG, šance na tah podle reálných měření a tržní ceny ka
 
 ## Co umí
 
-- **Obchod**: posledních 10 vydaných sad. Balíčky jsou zdarma po jednom, po deseti nebo jako booster box (36).
+- **Obchod**: posledních 10 vydaných sad, vše zdarma. Jednotlivý balíček si vybíráš z **regálu s 10 balíčky**
+  (obsah každého je určený předem a regál se uloží, takže obnovení stránky nic nepřelosuje; za vzatý balíček
+  přijde na regál nový). Po deseti nebo jako booster box (36) se balíčky berou naslepo.
   U každé sady je tabulka **šancí na tah** se složením balíčku a odkazy na zdroje.
+  <details><summary>Spoiler: tajný náznak</summary>
+  Balíček na regálu, ve kterém je Illustration Rare / Ultra Rare nebo vzácnější karta, jednou za čas
+  nenápadně problikne jiskřičkou. Bílá = IR/UR, zlatá a častější = SIR, duhová a nejčastější = zlatá karta,
+  Black White Rare apod. (<code>hintLevel</code> v <code>src/pack.ts</code>).
+  </details>
 - **Skutečné obaly a rub karet**: fotky booster packů každé sady (katalog TCGplayer) a oficiální rub
   karty Pokémon TCG. Když se obrázek nenačte, použije se náhradní potisk.
 - **Otevírání ve 3D**: balíček má přední a zadní stranu i boky, pohupuje se a naklání podle prstu, myši
   nebo náklonu telefonu; tažením ho jde otočit. Roztrhneš ho tažením přes horní okraj (nebo klepnutím),
-  horní pruh odletí a karty vyjedou z balíčku jako 3D balík. Kartu odhodíš klepnutím nebo tažením do strany.
-  Poslední tři karty jsou lícem dolů a otáčejí se ve 3D; vzácná karta se předtím rozzáří barvou rarity
-  a vybuchne částicemi, u SIR a zlatých karet navíc problikne obrazovka. Jde i otevřít bez animace
-  nebo všechny balíčky naráz.
+  horní pruh odletí a karty vyjedou z balíčku jako 3D balík lícem nahoru. Kartu odhodíš klepnutím nebo
+  tažením do strany. Když se objeví vzácná karta, rozzáří se barvou rarity a vybuchne částicemi,
+  u SIR a zlatých karet navíc problikne obrazovka. Jde i otevřít bez animace nebo všechny balíčky naráz.
 - **Holo efekty**: lesk podle rarity (holo, duhový, zlatý, Black White) a reverse holo včetně vzorů
   Poké Ball / Master Ball. Reaguje na myš, prst i náklon telefonu.
 - **Album**: přehled všech sad s procentem kompletnosti. Album sady zobrazuje všechny karty
@@ -83,7 +89,7 @@ pokemon-packs/
 ├── src/pack.ts         generátor balíčků (+ pack.test.ts)
 ├── src/store.ts        sbírka a neotevřené balíčky v localStorage
 ├── src/prices.ts       ceny z Pokémon TCG API / TCGdex
-└── src/views/          obchod, otevírání, album, detail karty, nastavení
+└── src/views/          obchod, regál, otevírání, album, detail karty, nastavení
 ```
 
 ## Upozornění

@@ -1,6 +1,11 @@
 // Stav hry uložený v prohlížeči (localStorage): neotevřené balíčky a sbírka.
 import type { PulledCard, Variant } from "./types";
 
+/** Balíček s předem určeným obsahem (z regálu v obchodě). */
+export interface SealedPack {
+  cards: { id: string; variant: Variant }[];
+}
+
 export interface PullRecord {
   setId: string;
   at: number;
@@ -19,6 +24,10 @@ export interface GameState {
   opened: Record<string, number>;
   /** Posledních několik otevřených balíčků. */
   history: PullRecord[];
+  /** Regál v obchodě: 10 nabízených balíčků každé sady. */
+  shelf: Record<string, SealedPack[]>;
+  /** Vybrané balíčky z regálu čekající na otevření (jsou součástí počtu v `packs`). */
+  sealed: Record<string, SealedPack[]>;
 }
 
 const KEY = "pokemon-packs:state:v1";
@@ -31,6 +40,8 @@ const empty = (): GameState => ({
   firstSeen: {},
   opened: {},
   history: [],
+  shelf: {},
+  sealed: {},
 });
 
 function load(): GameState {
@@ -70,6 +81,24 @@ export function addPacks(setId: string, count: number) {
   save();
 }
 
+export function setShelf(setId: string, packs: SealedPack[]) {
+  state.shelf[setId] = [...packs];
+  save();
+}
+
+/** Vezme balíček z regálu do zásoby a na jeho místo dá nový. */
+export function pickFromShelf(setId: string, index: number, replacement: SealedPack) {
+  const shelf = state.shelf[setId];
+  if (!shelf?.[index]) throw new Error("Balíček na regálu není");
+  (state.sealed[setId] ??= []).push(shelf[index]);
+  shelf[index] = replacement;
+  state.packs[setId] = (state.packs[setId] ?? 0) + 1;
+  save();
+}
+
+/** Další vybraný balíček sady, který se otevře jako první (bez odebrání). */
+export const nextSealed = (setId: string): SealedPack | undefined => state.sealed[setId]?.[0];
+
 export const unopenedTotal = () => Object.values(state.packs).reduce((a, b) => a + b, 0);
 
 /** Odebere balíček ze zásoby a přidá jeho karty do sbírky. Vrací id karet, které jsou nové. */
@@ -77,6 +106,8 @@ export function recordOpening(setId: string, cards: PulledCard[]): Set<string> {
   if (!state.packs[setId]) throw new Error("Žádný neotevřený balíček této sady");
   state.packs[setId] -= 1;
   if (state.packs[setId] === 0) delete state.packs[setId];
+  state.sealed[setId]?.shift();
+  if (state.sealed[setId]?.length === 0) delete state.sealed[setId];
 
   const fresh = new Set<string>();
   const now = Date.now();
